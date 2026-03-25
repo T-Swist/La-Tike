@@ -1,2 +1,2 @@
-# La-Tike
-La Tike is a Liberian base Ticketing Site
+# GetMazza
+It is a event ticketing website

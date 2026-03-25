@@ -1,0 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=Glass+Antiqua&display=swap');
+@import url('https://fonts.cdnfonts.com/css/wellston?styles=27571,27573,27567,27569,27565');
+@import url('https://fonts.cdnfonts.com/css/brenton?styles=132879');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
