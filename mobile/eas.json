@@ -4,13 +4,21 @@
     "appVersionSource": "remote"
   },
   "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://192.168.1.125:5000/api/v1",
+        "EXPO_PUBLIC_CURRENCY": "PLN"
+      }
+    },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.100.35:5000/api/v1",
+        "EXPO_PUBLIC_API_URL": "http://192.168.1.125:5000/api/v1",
         "EXPO_PUBLIC_CURRENCY": "PLN"
       }
     },

@@ -47,6 +47,12 @@
         }
       ],
       "expo-build-properties"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "edddc7eb-0964-477c-bf82-4c3556a47c9a"
+      }
+    },
+    "owner": "t-swist"
   }
 }
