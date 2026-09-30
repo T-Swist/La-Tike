@@ -1,4 +1,4 @@
-# Dependencies
+# Dependencies (installed inside the image)
 node_modules
 npm-debug.log*
 
@@ -6,52 +6,27 @@ npm-debug.log*
 dist
 build
 
-# Environment files
+# Environment files (config is passed in by docker compose)
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
 
-# Database
-*.db
-*.sqlite
-
-# Logs
+# Logs & runtime data
 logs
 *.log
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
+uploads
 coverage
+tmp
+temp
 
-# IDE
+# IDE / OS
 .vscode
 .idea
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Git
+# Git & Docker
 .git
 .gitignore
-
-# Docker
 Dockerfile
-docker-compose.yml
 .dockerignore
-
-# Prisma
-migrations
-
-# Cache
-.cache
-.parcel-cache
-
-# Temporary files
-tmp
-temp

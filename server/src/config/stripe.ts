@@ -1,8 +1,19 @@
 import Stripe from 'stripe';
+import env from './env';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2024-12-18.acacia',
-  typescript: true,
-});
+let client: Stripe | null = null;
 
-export default stripe;
+export const getStripe = (): Stripe => {
+  if (!env.stripeConfigured) {
+    throw new Error('Stripe is not configured (STRIPE_SECRET_KEY is missing)');
+  }
+  if (!client) {
+    client = new Stripe(env.STRIPE_SECRET_KEY!, {
+      apiVersion: '2023-10-16',
+      typescript: true,
+    });
+  }
+  return client;
+};
+
+export default getStripe;

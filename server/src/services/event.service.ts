@@ -1,9 +1,17 @@
+import { EventStatus, Prisma, UserRole } from '@prisma/client';
 import prisma from '../config/database';
-import { CreateEventDTO, UpdateEventDTO } from '../types/dtos';
+import { CreateEventInput, UpdateEventInput } from '../validators';
 import cloudinary from '../config/cloudinary';
+import { AuthUser } from '../types';
+import { badRequest, conflict, forbidden, notFound } from '../utils/AppError';
+
+const PUBLIC_STATUSES: EventStatus[] = ['PUBLISHED', 'COMPLETED'];
+
+const canManage = (user: AuthUser, hostId: string) =>
+  user.role === UserRole.ADMIN || user.id === hostId;
 
 export class EventService {
-  async createEvent(hostId: string, dto: CreateEventDTO) {
+  async createEvent(hostId: string, dto: CreateEventInput) {
     const event = await prisma.event.create({
       data: {
         hostId,
@@ -23,14 +31,16 @@ export class EventService {
         coverImage: dto.coverImage,
         images: dto.images || [],
         tags: dto.tags || [],
+        status: dto.status,
+        totalCapacity: dto.totalCapacity,
         ticketTypes: {
           create: dto.ticketTypes.map((tt) => ({
             name: tt.name,
             description: tt.description,
             price: tt.price,
             quantity: tt.quantity,
-            minPerOrder: tt.minPerOrder || 1,
-            maxPerOrder: tt.maxPerOrder || 10,
+            minPerOrder: tt.minPerOrder,
+            maxPerOrder: tt.maxPerOrder,
             salesStartDate: tt.salesStartDate ? new Date(tt.salesStartDate) : null,
             salesEndDate: tt.salesEndDate ? new Date(tt.salesEndDate) : null,
           })),
@@ -52,25 +62,28 @@ export class EventService {
     return event;
   }
 
-  async getEventById(eventId: string) {
+  async getEventById(eventId: string, viewer?: AuthUser) {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
       include: {
-        ticketTypes: true,
+        ticketTypes: { where: { isActive: true }, orderBy: { price: 'asc' } },
         host: {
           select: {
             id: true,
             firstName: true,
             lastName: true,
-            email: true,
             profileImage: true,
           },
         },
       },
     });
 
-    if (!event) {
-      throw new Error('Event not found');
+    // Drafts and cancelled events are only visible to their host and admins.
+    const isVisible =
+      event && (PUBLIC_STATUSES.includes(event.status) || (viewer && canManage(viewer, event.hostId)));
+
+    if (!event || !isVisible) {
+      throw notFound('Event not found');
     }
 
     return event;
@@ -80,19 +93,27 @@ export class EventService {
     category?: string;
     status?: string;
     search?: string;
+    upcoming?: boolean;
     page?: number;
     limit?: number;
   }) {
-    const { category, status, search, page = 1, limit = 20 } = filters;
+    const page = Math.max(1, filters.page || 1);
+    const limit = Math.min(100, Math.max(1, filters.limit || 20));
+    const { category, status, search, upcoming } = filters;
 
-    const where: any = {};
+    const statusFilter = PUBLIC_STATUSES.includes(status as EventStatus)
+      ? (status as EventStatus)
+      : 'PUBLISHED';
 
-    if (category) where.category = category;
-    if (status) where.status = status;
+    const where: Prisma.EventWhereInput = { status: statusFilter };
+
+    if (category) where.category = { equals: category, mode: 'insensitive' };
+    if (upcoming) where.endDate = { gte: new Date() };
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } },
+        { location: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -100,7 +121,7 @@ export class EventService {
       prisma.event.findMany({
         where,
         include: {
-          ticketTypes: true,
+          ticketTypes: { where: { isActive: true }, orderBy: { price: 'asc' } },
           host: {
             select: {
               id: true,
@@ -111,7 +132,7 @@ export class EventService {
         },
         skip: (page - 1) * limit,
         take: limit,
-        orderBy: { startDate: 'asc' },
+        orderBy: [{ isFeatured: 'desc' }, { startDate: 'asc' }],
       }),
       prisma.event.count({ where }),
     ]);
@@ -119,59 +140,93 @@ export class EventService {
     return { events, total, page, limit };
   }
 
-  async updateEvent(eventId: string, hostId: string, dto: UpdateEventDTO) {
+  // Events owned by a host, with sales and check-in figures for the host dashboard.
+  async getHostEvents(hostId: string) {
+    const events = await prisma.event.findMany({
+      where: { hostId },
+      include: { ticketTypes: { orderBy: { price: 'asc' } } },
+      orderBy: { startDate: 'desc' },
+    });
+
+    const eventIds = events.map((e) => e.id);
+    const [checkedIn, revenue] = await Promise.all([
+      prisma.ticket.groupBy({
+        by: ['eventId'],
+        where: { eventId: { in: eventIds }, status: 'USED' },
+        _count: { _all: true },
+      }),
+      prisma.order.groupBy({
+        by: ['eventId'],
+        where: { eventId: { in: eventIds }, status: 'COMPLETED' },
+        _sum: { totalAmount: true, serviceFee: true, platformFee: true },
+      }),
+    ]);
+
+    return events.map((event) => {
+      const ticketsSold = event.ticketTypes.reduce((sum, tt) => sum + tt.sold, 0);
+      const totalTickets = event.ticketTypes.reduce((sum, tt) => sum + tt.quantity, 0);
+      const sums = revenue.find((r) => r.eventId === event.id)?._sum;
+      const fees = (sums?.serviceFee ?? 0) + (sums?.platformFee ?? 0);
+      return {
+        ...event,
+        stats: {
+          ticketsSold,
+          totalTickets,
+          checkedIn: checkedIn.find((c) => c.eventId === event.id)?._count._all ?? 0,
+          // What the host earns: ticket sales without the fees added on top for buyers
+          revenue: Math.round(((sums?.totalAmount ?? 0) - fees) * 100) / 100,
+          feesCollected: Math.round(fees * 100) / 100,
+        },
+      };
+    });
+  }
+
+  async updateEvent(eventId: string, user: AuthUser, dto: UpdateEventInput) {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
     });
 
     if (!event) {
-      throw new Error('Event not found');
+      throw notFound('Event not found');
     }
 
-    if (event.hostId !== hostId) {
-      throw new Error('Unauthorized');
+    if (!canManage(user, event.hostId)) {
+      throw forbidden('You can only edit your own events');
     }
 
-    const updated = await prisma.event.update({
+    const startDate = dto.startDate ? new Date(dto.startDate) : event.startDate;
+    const endDate = dto.endDate ? new Date(dto.endDate) : event.endDate;
+    if (endDate <= startDate) {
+      throw badRequest('endDate must be after startDate');
+    }
+
+    const { startDate: _s, endDate: _e, ...rest } = dto;
+
+    return prisma.event.update({
       where: { id: eventId },
-      data: {
-        ...(dto.title && { title: dto.title }),
-        ...(dto.description && { description: dto.description }),
-        ...(dto.category && { category: dto.category }),
-        ...(dto.location && { location: dto.location }),
-        ...(dto.venue && { venue: dto.venue }),
-        ...(dto.address && { address: dto.address }),
-        ...(dto.city && { city: dto.city }),
-        ...(dto.state && { state: dto.state }),
-        ...(dto.country && { country: dto.country }),
-        ...(dto.latitude && { latitude: dto.latitude }),
-        ...(dto.longitude && { longitude: dto.longitude }),
-        ...(dto.startDate && { startDate: new Date(dto.startDate) }),
-        ...(dto.endDate && { endDate: new Date(dto.endDate) }),
-        ...(dto.coverImage && { coverImage: dto.coverImage }),
-        ...(dto.images && { images: dto.images }),
-        ...(dto.status && { status: dto.status }),
-        ...(dto.tags && { tags: dto.tags }),
-      },
+      data: { ...rest, startDate, endDate },
       include: {
         ticketTypes: true,
       },
     });
-
-    return updated;
   }
 
-  async deleteEvent(eventId: string, hostId: string) {
+  async deleteEvent(eventId: string, user: AuthUser) {
     const event = await prisma.event.findUnique({
       where: { id: eventId },
+      include: { _count: { select: { tickets: true } } },
     });
 
     if (!event) {
-      throw new Error('Event not found');
+      throw notFound('Event not found');
     }
 
-    if (event.hostId !== hostId) {
-      throw new Error('Unauthorized');
+    if (!canManage(user, event.hostId)) {
+      throw forbidden('You can only delete your own events');
+    }
+
+    if (event._count.tickets > 0) {
+      throw conflict('This event has sold tickets. Cancel it instead of deleting it.');
     }
 
     await prisma.event.delete({

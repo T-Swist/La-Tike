@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { EventController } from '../controllers/event.controller';
-import { authenticate, authorize } from '../middleware/auth';
+import { authenticate, authorize, optionalAuth } from '../middleware/auth';
 import { upload } from '../middleware/upload';
+import { validate } from '../middleware/validate';
+import { asyncHandler } from '../utils/AppError';
+import { createEventSchema, updateEventSchema } from '../validators';
 
 const router = Router();
 const eventController = new EventController();
@@ -34,7 +37,23 @@ const eventController = new EventController();
  *         schema:
  *           type: integer
  */
-router.get('/', eventController.getEvents.bind(eventController));
+router.get('/', asyncHandler(eventController.getEvents.bind(eventController)));
+
+/**
+ * @swagger
+ * /events/my-events:
+ *   get:
+ *     summary: Get the current host's events with sales stats
+ *     tags: [Events]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get(
+  '/my-events',
+  authenticate,
+  authorize('HOST', 'ADMIN'),
+  asyncHandler(eventController.getMyEvents.bind(eventController))
+);
 
 /**
  * @swagger
@@ -49,7 +68,7 @@ router.get('/', eventController.getEvents.bind(eventController));
  *         schema:
  *           type: string
  */
-router.get('/:id', eventController.getEventById.bind(eventController));
+router.get('/:id', optionalAuth, asyncHandler(eventController.getEventById.bind(eventController)));
 
 /**
  * @swagger
@@ -64,7 +83,8 @@ router.post(
   '/',
   authenticate,
   authorize('HOST', 'ADMIN'),
-  eventController.createEvent.bind(eventController)
+  validate(createEventSchema),
+  asyncHandler(eventController.createEvent.bind(eventController))
 );
 
 /**
@@ -80,7 +100,8 @@ router.put(
   '/:id',
   authenticate,
   authorize('HOST', 'ADMIN'),
-  eventController.updateEvent.bind(eventController)
+  validate(updateEventSchema),
+  asyncHandler(eventController.updateEvent.bind(eventController))
 );
 
 /**
@@ -96,7 +117,7 @@ router.delete(
   '/:id',
   authenticate,
   authorize('HOST', 'ADMIN'),
-  eventController.deleteEvent.bind(eventController)
+  asyncHandler(eventController.deleteEvent.bind(eventController))
 );
 
 /**
@@ -113,7 +134,7 @@ router.post(
   authenticate,
   authorize('HOST', 'ADMIN'),
   upload.single('image'),
-  eventController.uploadImage.bind(eventController)
+  asyncHandler(eventController.uploadImage.bind(eventController))
 );
 
 export default router;

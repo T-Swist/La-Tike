@@ -1,23 +1,42 @@
 import bcrypt from 'bcryptjs';
+import { User } from '@prisma/client';
 import prisma from '../config/database';
-import { RegisterDTO, LoginDTO } from '../types/dtos';
+import env from '../config/env';
+import { RegisterInput, LoginInput } from '../validators';
 import { TokenPair } from '../types';
-import { generateTokenPair } from '../utils/jwt';
+import { generateTokenPair, hashToken, verifyRefreshToken } from '../utils/jwt';
+import { conflict, notFound, unauthorized } from '../utils/AppError';
+
+export type PublicUser = Omit<User, 'password' | 'refreshToken'>;
+
+const toPublicUser = ({ password: _p, refreshToken: _r, ...user }: User): PublicUser => user;
 
 export class AuthService {
-  async register(dto: RegisterDTO): Promise<TokenPair> {
+  private async issueTokens(user: User): Promise<TokenPair> {
+    const tokens = generateTokenPair({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { refreshToken: hashToken(tokens.refreshToken) },
+    });
+
+    return tokens;
+  }
+
+  async register(dto: RegisterInput): Promise<TokenPair & { user: PublicUser }> {
     const existingUser = await prisma.user.findUnique({
       where: { email: dto.email },
     });
 
     if (existingUser) {
-      throw new Error('User already exists');
+      throw conflict('An account with this email already exists');
     }
 
-    const hashedPassword = await bcrypt.hash(
-      dto.password,
-      parseInt(process.env.BCRYPT_ROUNDS || '10')
-    );
+    const hashedPassword = await bcrypt.hash(dto.password, env.BCRYPT_ROUNDS);
 
     const user = await prisma.user.create({
       data: {
@@ -26,79 +45,44 @@ export class AuthService {
         firstName: dto.firstName,
         lastName: dto.lastName,
         phone: dto.phone,
-        role: dto.role || 'CUSTOMER',
+        role: dto.role,
       },
     });
 
-    const tokens = generateTokenPair({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    });
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: tokens.refreshToken },
-    });
-
-    return tokens;
+    const tokens = await this.issueTokens(user);
+    return { ...tokens, user: toPublicUser(user) };
   }
 
-  async login(dto: LoginDTO): Promise<TokenPair & { user: any }> {
+  async login(dto: LoginInput): Promise<TokenPair & { user: PublicUser }> {
     const user = await prisma.user.findUnique({
       where: { email: dto.email },
     });
 
-    if (!user) {
-      throw new Error('Invalid credentials');
+    // Same error for unknown email and wrong password to avoid account enumeration.
+    if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+      throw unauthorized('Invalid email or password');
     }
 
-    const isPasswordValid = await bcrypt.compare(dto.password, user.password);
-
-    if (!isPasswordValid) {
-      throw new Error('Invalid credentials');
-    }
-
-    const tokens = generateTokenPair({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    });
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: tokens.refreshToken },
-    });
-
-    const { password, refreshToken, ...userWithoutSensitive } = user;
-
-    return {
-      ...tokens,
-      user: userWithoutSensitive,
-    };
+    const tokens = await this.issueTokens(user);
+    return { ...tokens, user: toPublicUser(user) };
   }
 
   async refreshToken(refreshToken: string): Promise<TokenPair> {
+    try {
+      verifyRefreshToken(refreshToken);
+    } catch {
+      throw unauthorized('Invalid or expired refresh token');
+    }
+
     const user = await prisma.user.findFirst({
-      where: { refreshToken },
+      where: { refreshToken: hashToken(refreshToken) },
     });
 
     if (!user) {
-      throw new Error('Invalid refresh token');
+      throw unauthorized('Invalid or expired refresh token');
     }
 
-    const tokens = generateTokenPair({
-      userId: user.id,
-      email: user.email,
-      role: user.role,
-    });
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { refreshToken: tokens.refreshToken },
-    });
-
-    return tokens;
+    return this.issueTokens(user);
   }
 
   async logout(userId: string): Promise<void> {
@@ -106,5 +90,13 @@ export class AuthService {
       where: { id: userId },
       data: { refreshToken: null },
     });
+  }
+
+  async getProfile(userId: string): Promise<PublicUser> {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw notFound('User not found');
+    }
+    return toPublicUser(user);
   }
 }

@@ -1,128 +1,93 @@
-import React, { useState } from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  TouchableOpacity,
   SafeAreaView,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useTheme } from '../../theme';
+import { useGetMyEventsQuery } from '../../store/api/host/hostApi';
+import { formatPrice } from '../../utils/format';
+import { getErrorMessage } from '../../utils/errors';
 
-interface AnalyticsData {
-  totalRevenue: number;
-  totalTicketsSold: number;
-  totalEvents: number;
-  activeEvents: number;
-  revenueGrowth: number;
-  ticketGrowth: number;
-}
-
-interface EventPerformance {
-  id: string;
-  title: string;
-  ticketsSold: number;
-  totalTickets: number;
-  revenue: number;
-  attendanceRate: number;
-}
-
-const MOCK_ANALYTICS: AnalyticsData = {
-  totalRevenue: 143500,
-  totalTicketsSold: 1050,
-  totalEvents: 3,
-  activeEvents: 2,
-  revenueGrowth: 23.5,
-  ticketGrowth: 18.2,
-};
-
-const MOCK_EVENT_PERFORMANCE: EventPerformance[] = [
-  {
-    id: '1',
-    title: 'Summer Music Festival',
-    ticketsSold: 850,
-    totalTickets: 1200,
-    revenue: 127500,
-    attendanceRate: 71,
-  },
-  {
-    id: '2',
-    title: 'Art Gallery Opening',
-    ticketsSold: 120,
-    totalTickets: 350,
-    revenue: 0,
-    attendanceRate: 34,
-  },
-  {
-    id: '3',
-    title: 'Food & Wine Tasting',
-    ticketsSold: 80,
-    totalTickets: 80,
-    revenue: 16000,
-    attendanceRate: 100,
-  },
-];
+const percent = (part: number, whole: number) => (whole ? Math.round((part / whole) * 100) : 0);
 
 export default function HostAnalyticsScreen() {
   const { theme } = useTheme();
-  const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'year'>('month');
+  const { data: events = [], isLoading, isFetching, error, refetch } = useGetMyEventsQuery();
 
   const styles = createStyles(theme);
 
-  const analytics = MOCK_ANALYTICS;
-  const eventPerformance = MOCK_EVENT_PERFORMANCE;
+  const analytics = useMemo(() => {
+    const now = new Date();
+    const totals = events.reduce(
+      (acc, event) => ({
+        revenue: acc.revenue + event.stats.revenue,
+        fees: acc.fees + event.stats.feesCollected,
+        sold: acc.sold + event.stats.ticketsSold,
+        checkedIn: acc.checkedIn + event.stats.checkedIn,
+      }),
+      { revenue: 0, fees: 0, sold: 0, checkedIn: 0 }
+    );
+    const activeEvents = events.filter(
+      (e) => e.status === 'PUBLISHED' && new Date(e.endDate) >= now
+    ).length;
+
+    return {
+      ...totals,
+      totalEvents: events.length,
+      activeEvents,
+      attendanceRate: percent(totals.checkedIn, totals.sold),
+      avgTicketPrice: totals.sold ? totals.revenue / totals.sold : 0,
+    };
+  }, [events]);
+
+  const eventPerformance = useMemo(
+    () => [...events].filter((e) => e.status !== 'DRAFT').sort((a, b) => b.stats.revenue - a.stats.revenue),
+    [events]
+  );
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={[styles.container, { justifyContent: 'center' }]}>
+        <ActivityIndicator size="large" color={theme.primary} />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isFetching} onRefresh={refetch} tintColor={theme.primary} />
+        }
+      >
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Analytics</Text>
-          <Text style={styles.headerSubtitle}>Track your event performance</Text>
-        </View>
-
-        {/* Period Selector */}
-        <View style={styles.periodSelector}>
-          {(['week', 'month', 'year'] as const).map(period => (
-            <TouchableOpacity
-              key={period}
-              style={[
-                styles.periodButton,
-                selectedPeriod === period && styles.periodButtonActive,
-              ]}
-              onPress={() => setSelectedPeriod(period)}
-            >
-              <Text
-                style={[
-                  styles.periodButtonText,
-                  selectedPeriod === period && styles.periodButtonTextActive,
-                ]}
-              >
-                {period.charAt(0).toUpperCase() + period.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
+          <Text style={styles.headerSubtitle}>
+            {error ? getErrorMessage(error) : 'Track your event performance (all time)'}
+          </Text>
         </View>
 
         {/* Key Metrics */}
         <View style={styles.metricsContainer}>
           <View style={styles.metricCard}>
             <View style={styles.metricHeader}>
-              <Text style={styles.metricLabel}>Total Revenue</Text>
-              <View style={[styles.growthBadge, styles.growthBadgePositive]}>
-                <Text style={styles.growthText}>+{analytics.revenueGrowth}%</Text>
-              </View>
+              <Text style={styles.metricLabel}>Ticket Revenue</Text>
             </View>
-            <Text style={styles.metricValue}>{analytics.totalRevenue.toLocaleString()} PLN</Text>
-            <Text style={styles.metricSubtext}>From {analytics.totalTicketsSold} tickets sold</Text>
+            <Text style={styles.metricValue}>{formatPrice(analytics.revenue)}</Text>
+            <Text style={styles.metricSubtext}>From {analytics.sold} tickets sold</Text>
           </View>
 
           <View style={styles.metricRow}>
             <View style={[styles.metricCard, styles.metricCardSmall]}>
-              <Text style={styles.metricLabel}>Tickets Sold</Text>
-              <Text style={styles.metricValue}>{analytics.totalTicketsSold}</Text>
-              <View style={[styles.growthBadge, styles.growthBadgePositive]}>
-                <Text style={styles.growthText}>+{analytics.ticketGrowth}%</Text>
-              </View>
+              <Text style={styles.metricLabel}>Checked In</Text>
+              <Text style={styles.metricValue}>{analytics.checkedIn}</Text>
+              <Text style={styles.metricSubtext}>{analytics.attendanceRate}% attendance</Text>
             </View>
 
             <View style={[styles.metricCard, styles.metricCardSmall]}>
@@ -136,10 +101,14 @@ export default function HostAnalyticsScreen() {
         {/* Event Performance */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Event Performance</Text>
-          
+
+          {eventPerformance.length === 0 && (
+            <Text style={styles.metricSubtext}>Sales will appear here once your events are published.</Text>
+          )}
+
           {eventPerformance.map(event => {
-            const progress = Math.round((event.ticketsSold / event.totalTickets) * 100);
-            
+            const progress = percent(event.stats.ticketsSold, event.stats.totalTickets);
+
             return (
               <View key={event.id} style={styles.performanceCard}>
                 <View style={styles.performanceHeader}>
@@ -147,14 +116,14 @@ export default function HostAnalyticsScreen() {
                     {event.title}
                   </Text>
                   <Text style={styles.performanceRevenue}>
-                    {event.revenue.toLocaleString()} PLN
+                    {formatPrice(event.stats.revenue)}
                   </Text>
                 </View>
 
                 <View style={styles.performanceStats}>
                   <View style={styles.performanceStat}>
                     <Text style={styles.performanceStatValue}>
-                      {event.ticketsSold}/{event.totalTickets}
+                      {event.stats.ticketsSold}/{event.stats.totalTickets}
                     </Text>
                     <Text style={styles.performanceStatLabel}>Tickets</Text>
                   </View>
@@ -163,7 +132,9 @@ export default function HostAnalyticsScreen() {
                     <Text style={styles.performanceStatLabel}>Sold</Text>
                   </View>
                   <View style={styles.performanceStat}>
-                    <Text style={styles.performanceStatValue}>{event.attendanceRate}%</Text>
+                    <Text style={styles.performanceStatValue}>
+                      {percent(event.stats.checkedIn, event.stats.ticketsSold)}%
+                    </Text>
                     <Text style={styles.performanceStatLabel}>Attendance</Text>
                   </View>
                 </View>
@@ -181,27 +152,21 @@ export default function HostAnalyticsScreen() {
         {/* Revenue Breakdown */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Revenue Breakdown</Text>
-          
+
           <View style={styles.breakdownCard}>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Ticket Sales</Text>
-              <Text style={styles.breakdownValue}>143,500 PLN</Text>
+              <Text style={styles.breakdownLabel}>Paid by buyers</Text>
+              <Text style={styles.breakdownValue}>{formatPrice(analytics.revenue + analytics.fees)}</Text>
             </View>
             <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Platform Fee (5%)</Text>
+              <Text style={styles.breakdownLabel}>Service & platform fees</Text>
               <Text style={[styles.breakdownValue, styles.breakdownValueNegative]}>
-                -7,175 PLN
-              </Text>
-            </View>
-            <View style={styles.breakdownRow}>
-              <Text style={styles.breakdownLabel}>Payment Processing (2%)</Text>
-              <Text style={[styles.breakdownValue, styles.breakdownValueNegative]}>
-                -2,870 PLN
+                -{formatPrice(analytics.fees)}
               </Text>
             </View>
             <View style={[styles.breakdownRow, styles.breakdownRowTotal]}>
-              <Text style={styles.breakdownLabelTotal}>Net Revenue</Text>
-              <Text style={styles.breakdownValueTotal}>133,455 PLN</Text>
+              <Text style={styles.breakdownLabelTotal}>Your ticket revenue</Text>
+              <Text style={styles.breakdownValueTotal}>{formatPrice(analytics.revenue)}</Text>
             </View>
           </View>
         </View>
@@ -209,27 +174,27 @@ export default function HostAnalyticsScreen() {
         {/* Quick Stats */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Stats</Text>
-          
+
           <View style={styles.quickStatsGrid}>
             <View style={styles.quickStatCard}>
               <Text style={styles.quickStatIcon}>📊</Text>
-              <Text style={styles.quickStatValue}>71%</Text>
+              <Text style={styles.quickStatValue}>{analytics.attendanceRate}%</Text>
               <Text style={styles.quickStatLabel}>Avg. Attendance</Text>
             </View>
             <View style={styles.quickStatCard}>
               <Text style={styles.quickStatIcon}>💰</Text>
-              <Text style={styles.quickStatValue}>137 PLN</Text>
+              <Text style={styles.quickStatValue}>{formatPrice(analytics.avgTicketPrice)}</Text>
               <Text style={styles.quickStatLabel}>Avg. Ticket Price</Text>
             </View>
             <View style={styles.quickStatCard}>
-              <Text style={styles.quickStatIcon}>👥</Text>
-              <Text style={styles.quickStatValue}>350</Text>
-              <Text style={styles.quickStatLabel}>Avg. Attendees</Text>
+              <Text style={styles.quickStatIcon}>🎫</Text>
+              <Text style={styles.quickStatValue}>{analytics.sold}</Text>
+              <Text style={styles.quickStatLabel}>Tickets Sold</Text>
             </View>
             <View style={styles.quickStatCard}>
-              <Text style={styles.quickStatIcon}>⭐</Text>
-              <Text style={styles.quickStatValue}>4.8</Text>
-              <Text style={styles.quickStatLabel}>Avg. Rating</Text>
+              <Text style={styles.quickStatIcon}>🎉</Text>
+              <Text style={styles.quickStatValue}>{analytics.totalEvents}</Text>
+              <Text style={styles.quickStatLabel}>Events Hosted</Text>
             </View>
           </View>
         </View>

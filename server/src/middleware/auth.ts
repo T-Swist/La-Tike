@@ -4,32 +4,41 @@ import { verifyAccessToken } from '../utils/jwt';
 import { sendError } from '../utils/response';
 import { UserRole } from '@prisma/client';
 
+const readUser = (req: AuthRequest) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+  const decoded = verifyAccessToken(authHeader.substring(7));
+  return { id: decoded.userId, email: decoded.email, role: decoded.role };
+};
+
 export const authenticate = async (
   req: AuthRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const user = readUser(req);
+    if (!user) {
       sendError(res, 'No token provided', 401);
       return;
     }
-
-    const token = authHeader.substring(7);
-    const decoded = verifyAccessToken(token);
-
-    req.user = {
-      id: decoded.userId,
-      email: decoded.email,
-      role: decoded.role,
-    };
-
+    req.user = user;
     next();
   } catch (error) {
     sendError(res, 'Invalid or expired token', 401);
   }
+};
+
+// Attaches req.user when a valid token is present, but never rejects the request.
+export const optionalAuth = (req: AuthRequest, _res: Response, next: NextFunction): void => {
+  try {
+    req.user = readUser(req) ?? undefined;
+  } catch {
+    req.user = undefined;
+  }
+  next();
 };
 
 export const authorize = (...roles: UserRole[]) => {

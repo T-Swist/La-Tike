@@ -1,45 +1,44 @@
-# Use Node.js 18 Alpine as base image
-FROM node:18-alpine
+# ---------- Build stage: compile TypeScript and generate the Prisma client ----------
+FROM node:22-alpine AS build
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apk add --no-cache \
-    python3 \
-    make \
-    g++ \
-    && ln -sf python3 /usr/bin/python
+# Prisma's query engine needs OpenSSL on Alpine
+RUN apk add --no-cache openssl
 
-# Copy package files
-COPY package*.json ./
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# Install dependencies
-RUN npm ci --only=production && npm cache clean --force
-
-# Copy source code
-COPY . .
-
-# Generate Prisma client
+COPY prisma ./prisma
 RUN npx prisma generate
 
-# Build the application
+COPY tsconfig.json ./
+COPY src ./src
 RUN npm run build
 
-# Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+# ---------- Runtime stage: production dependencies + compiled output only ----------
+FROM node:22-alpine AS runtime
 
-# Change ownership of the app directory
-RUN chown -R nodejs:nodejs /app
-USER nodejs
+WORKDIR /app
+ENV NODE_ENV=production
 
-# Expose port
+RUN apk add --no-cache openssl
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY prisma ./prisma
+COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build /app/dist ./dist
+
+# The official image ships a non-root "node" user
+RUN mkdir -p logs && chown -R node:node /app
+USER node
+
 EXPOSE 5000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD node dist/healthcheck.js || exit 1
 
-# Start the application
-CMD ["npm", "start"]
+# Apply pending migrations, then start the API
+CMD ["npm", "run", "start:docker"]

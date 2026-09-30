@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,79 +9,61 @@ import {
   Image,
   FlatList,
   SafeAreaView,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTheme } from '../../theme';
 import { useGetEventsQuery } from '../../store/api/customer/customerApi';
+import { CustomerStackParamList } from '../../navigation/CustomerNavigator';
+import type { Event } from '../../types/api';
+import { formatDate, formatPrice } from '../../utils/format';
+import { getErrorMessage } from '../../utils/errors';
 
-interface Event {
-  id: string;
-  title: string;
-  date: string;
-  location: string;
-  price: number;
-  image: string;
-  category: string;
-  attendees: number;
-}
+const CATEGORIES = ['All', 'Music', 'Arts', 'Food', 'Wellness', 'Technology', 'Sports'];
 
-const CATEGORIES = ['All', 'Music', 'Arts', 'Food', 'Sports', 'Outdoor'];
+const lowestPrice = (event: Event) =>
+  event.ticketTypes.length ? Math.min(...event.ticketTypes.map((t) => t.price)) : 0;
 
-const MOCK_EVENTS: Event[] = [
-  {
-    id: '1',
-    title: 'Summer Music Festival',
-    date: '2024-06-15',
-    location: 'Warsaw',
-    price: 150,
-    image: 'https://via.placeholder.com/400x200',
-    category: 'Music',
-    attendees: 1200,
-  },
-  {
-    id: '2',
-    title: 'Art Gallery Opening',
-    date: '2024-06-20',
-    location: 'Krakow',
-    price: 0,
-    image: 'https://via.placeholder.com/400x200',
-    category: 'Arts',
-    attendees: 350,
-  },
-  {
-    id: '3',
-    title: 'Food & Wine Tasting',
-    date: '2024-06-22',
-    location: 'Gdansk',
-    price: 200,
-    image: 'https://via.placeholder.com/400x200',
-    category: 'Food',
-    attendees: 80,
-  },
-];
+const ticketsSold = (event: Event) => event.ticketTypes.reduce((sum, t) => sum + t.sold, 0);
 
 export default function CustomerHomeScreen() {
   const { theme } = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<CustomerStackParamList>>();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  
-  // TODO: Replace with real API call when backend is ready
-  // const { data: events, isLoading } = useBrowseEventsQuery();
-  const events = MOCK_EVENTS;
+
+  const { data: events = [], isLoading, isFetching, error, refetch } = useGetEventsQuery();
 
   const styles = createStyles(theme);
 
-  const filteredEvents = events.filter(event => {
-    const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = selectedCategory === 'All' || event.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const filteredEvents = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return events.filter(event => {
+      const matchesSearch =
+        !query ||
+        event.title.toLowerCase().includes(query) ||
+        event.location.toLowerCase().includes(query);
+      const matchesCategory =
+        selectedCategory === 'All' || event.category.toLowerCase() === selectedCategory.toLowerCase();
+      return matchesSearch && matchesCategory;
+    });
+  }, [events, searchQuery, selectedCategory]);
 
   const renderEventCard = ({ item }: { item: Event }) => (
-    <TouchableOpacity style={styles.eventCard}>
+    <TouchableOpacity
+      style={styles.eventCard}
+      onPress={() => navigation.navigate('EventDetail', { eventId: item.id })}
+    >
       <View style={styles.eventImageContainer}>
-        <View style={styles.eventImagePlaceholder}>
-          <Text style={styles.eventImageText}>🎉</Text>
-        </View>
+        {item.coverImage ? (
+          <Image source={{ uri: item.coverImage }} style={styles.eventImagePlaceholder} />
+        ) : (
+          <View style={styles.eventImagePlaceholder}>
+            <Text style={styles.eventImageText}>🎉</Text>
+          </View>
+        )}
         <View style={styles.eventBadge}>
           <Text style={styles.eventBadgeText}>{item.category}</Text>
         </View>
@@ -93,19 +75,19 @@ export default function CustomerHomeScreen() {
         </Text>
         
         <View style={styles.eventMeta}>
-          <Text style={styles.eventMetaText}>📅 {new Date(item.date).toLocaleDateString()}</Text>
-          <Text style={styles.eventMetaText}>📍 {item.location}</Text>
+          <Text style={styles.eventMetaText}>📅 {formatDate(item.startDate)}</Text>
+          <Text style={styles.eventMetaText}>📍 {item.city || item.location}</Text>
         </View>
         
         <View style={styles.eventFooter}>
           <View style={styles.eventAttendees}>
             <Text style={styles.eventAttendeesText}>
-              👥 {item.attendees} going
+              👥 {ticketsSold(item)} going
             </Text>
           </View>
           <View style={styles.eventPrice}>
             <Text style={styles.eventPriceText}>
-              {item.price === 0 ? 'Free' : `${item.price} PLN`}
+              {lowestPrice(item) === 0 ? 'Free' : `from ${formatPrice(lowestPrice(item))}`}
             </Text>
           </View>
         </View>
@@ -170,13 +152,20 @@ export default function CustomerHomeScreen() {
         keyExtractor={item => item.id}
         contentContainerStyle={styles.eventsList}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={theme.primary} />
+        }
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateText}>No events found</Text>
-            <Text style={styles.emptyStateSubtext}>
-              Try adjusting your search or filters
-            </Text>
-          </View>
+          isLoading ? (
+            <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>{error ? "Could not load events" : "No events found"}</Text>
+              <Text style={styles.emptyStateSubtext}>
+                {error ? getErrorMessage(error) : "Try adjusting your search or filters"}
+              </Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>

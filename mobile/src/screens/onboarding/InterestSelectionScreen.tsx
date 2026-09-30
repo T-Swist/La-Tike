@@ -7,8 +7,12 @@ import {
   ScrollView,
   SafeAreaView,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { useDispatch } from 'react-redux';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../theme';
+import { setCredentials } from '../../store/slices/authSlice';
+import { AuthStackParamList } from '../../navigation/AuthNavigator';
 
 interface Interest {
   id: string;
@@ -50,8 +54,12 @@ const CATEGORIES = [
   'Outdoor Workouts',
 ];
 
+export const INTERESTS_STORAGE_KEY = '@latike_interests';
+
 export default function InterestSelectionScreen() {
   const navigation = useNavigation();
+  const route = useRoute<RouteProp<AuthStackParamList, 'InterestSelection'>>();
+  const dispatch = useDispatch();
   const { theme } = useTheme();
   const [selectedInterests, setSelectedInterests] = useState<string[]>([]);
 
@@ -65,10 +73,11 @@ export default function InterestSelectionScreen() {
     );
   };
 
-  const handleContinue = () => {
-    // TODO: Save interests to user profile
-    console.log('Selected interests:', selectedInterests);
-    // Navigate to next screen or complete onboarding
+  const handleContinue = async () => {
+    // Kept on the device for now; the API has no interests field yet.
+    await AsyncStorage.setItem(INTERESTS_STORAGE_KEY, JSON.stringify(selectedInterests)).catch(() => {});
+    // Signing in swaps the auth stack for the main app.
+    dispatch(setCredentials(route.params.session));
   };
 
   const renderCategory = (category: string) => {

@@ -1,10 +1,30 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import { generateQRCodeData } from './utils/qrcode';
 
 const prisma = new PrismaClient();
 
+// Dates relative to today so the sample events are always upcoming (or recently past).
+const at = (daysFromNow: number, hour: number, minute = 0): Date => {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + daysFromNow);
+  date.setUTCHours(hour, minute, 0, 0);
+  return date;
+};
+
+// Tickets need their id up front because the QR code signs it.
+const seedTicket = () => {
+  const id = crypto.randomUUID();
+  const qrCode = generateQRCodeData(id);
+  return { id, qrCode, qrHash: qrCode.split('.')[2] };
+};
+
 async function main() {
+  if (process.env.NODE_ENV === 'production' && !process.argv.includes('--force')) {
+    throw new Error('Refusing to wipe a production database. Re-run with --force if you really mean it.');
+  }
+
   console.log('🌱 Starting database seeding...');
 
   // Clean existing data
@@ -68,8 +88,8 @@ async function main() {
         address: 'National Stadium, Warsaw, Poland',
         city: 'Warsaw',
         country: 'Poland',
-        startDate: new Date('2024-06-15T18:00:00Z'),
-        endDate: new Date('2024-06-16T02:00:00Z'),
+        startDate: at(21, 18),
+        endDate: at(22, 2),
         status: 'PUBLISHED',
         isFeatured: true,
         totalCapacity: 1200,
@@ -107,8 +127,8 @@ async function main() {
         address: 'National Museum, Krakow, Poland',
         city: 'Krakow',
         country: 'Poland',
-        startDate: new Date('2024-06-20T19:00:00Z'),
-        endDate: new Date('2024-06-20T23:00:00Z'),
+        startDate: at(10, 19),
+        endDate: at(10, 23),
         status: 'PUBLISHED',
         totalCapacity: 350,
         tags: ['art', 'gallery', 'culture', 'free'],
@@ -137,8 +157,8 @@ async function main() {
         address: 'Old Town Market, Gdansk, Poland',
         city: 'Gdansk',
         country: 'Poland',
-        startDate: new Date('2024-05-10T17:00:00Z'),
-        endDate: new Date('2024-05-10T22:00:00Z'),
+        startDate: at(-20, 17),
+        endDate: at(-20, 22),
         status: 'COMPLETED',
         totalCapacity: 80,
         tags: ['food', 'wine', 'tasting', 'gourmet'],
@@ -167,8 +187,8 @@ async function main() {
         address: 'Szczytnicki Park, Wroclaw, Poland',
         city: 'Wroclaw',
         country: 'Poland',
-        startDate: new Date('2024-07-01T07:00:00Z'),
-        endDate: new Date('2024-07-01T08:30:00Z'),
+        startDate: at(5, 7),
+        endDate: at(5, 8, 30),
         status: 'PUBLISHED',
         totalCapacity: 50,
         tags: ['yoga', 'outdoor', 'fitness', 'morning'],
@@ -190,15 +210,15 @@ async function main() {
     prisma.event.create({
       data: {
         hostId: adminUser.id,
-        title: 'Tech Conference 2024',
+        title: 'Tech Conference 2026',
         description: 'Join industry leaders and innovators for a day of insights, networking, and cutting-edge technology discussions.',
         category: 'Technology',
         location: 'Poznan',
         address: 'Poznan International Fair, Poznan, Poland',
         city: 'Poznan',
         country: 'Poland',
-        startDate: new Date('2024-08-15T09:00:00Z'),
-        endDate: new Date('2024-08-15T18:00:00Z'),
+        startDate: at(45, 9),
+        endDate: at(45, 18),
         status: 'PUBLISHED',
         isFeatured: true,
         totalCapacity: 500,
@@ -233,9 +253,16 @@ async function main() {
   // Get events with their ticket types
   const eventsWithTicketTypes = await prisma.event.findMany({
     include: {
-      ticketTypes: true,
+      // Most expensive first, e.g. VIP Pass before General Admission
+      ticketTypes: { orderBy: { price: 'desc' } },
     },
   });
+
+  // Events were created in parallel, so look them up by title rather than position.
+  const byTitle = (title: string) => eventsWithTicketTypes.find((e) => e.title === title)!;
+  const summerFestival = byTitle('Summer Music Festival');
+  const artOpening = byTitle('Art Gallery Opening');
+  const wineTasting = byTitle('Food & Wine Tasting');
 
   // Create orders and tickets
   const orders = await Promise.all([
@@ -243,17 +270,16 @@ async function main() {
     prisma.order.create({
       data: {
         userId: customerUser.id,
-        eventId: eventsWithTicketTypes[0].id,
+        eventId: summerFestival.id,
         totalAmount: 150,
         serviceFee: 7.5,
         platformFee: 7.5,
         status: 'COMPLETED',
         tickets: {
           create: {
-            eventId: eventsWithTicketTypes[0].id,
-            ticketTypeId: eventsWithTicketTypes[0].ticketTypes[0].id,
-            qrCode: 'LAT-2024-000001',
-            qrHash: crypto.createHash('sha256').update('LAT-2024-000001').digest('hex'),
+            eventId: summerFestival.id,
+            ticketTypeId: summerFestival.ticketTypes[0].id,
+            ...seedTicket(),
             holderName: 'John Doe',
             holderEmail: 'customer@latike.com',
           },
@@ -272,17 +298,16 @@ async function main() {
     prisma.order.create({
       data: {
         userId: customerUser.id,
-        eventId: eventsWithTicketTypes[1].id,
+        eventId: artOpening.id,
         totalAmount: 0,
         serviceFee: 0,
         platformFee: 0,
         status: 'COMPLETED',
         tickets: {
           create: {
-            eventId: eventsWithTicketTypes[1].id,
-            ticketTypeId: eventsWithTicketTypes[1].ticketTypes[0].id,
-            qrCode: 'LAT-2024-000002',
-            qrHash: crypto.createHash('sha256').update('LAT-2024-000002').digest('hex'),
+            eventId: artOpening.id,
+            ticketTypeId: artOpening.ticketTypes[0].id,
+            ...seedTicket(),
             holderName: 'John Doe',
             holderEmail: 'customer@latike.com',
           },
@@ -293,21 +318,20 @@ async function main() {
     prisma.order.create({
       data: {
         userId: customerUser.id,
-        eventId: eventsWithTicketTypes[2].id,
+        eventId: wineTasting.id,
         totalAmount: 200,
         serviceFee: 10,
         platformFee: 10,
         status: 'COMPLETED',
         tickets: {
           create: {
-            eventId: eventsWithTicketTypes[2].id,
-            ticketTypeId: eventsWithTicketTypes[2].ticketTypes[0].id,
-            qrCode: 'LAT-2024-000003',
-            qrHash: crypto.createHash('sha256').update('LAT-2024-000003').digest('hex'),
+            eventId: wineTasting.id,
+            ticketTypeId: wineTasting.ticketTypes[0].id,
+            ...seedTicket(),
             status: 'USED',
             holderName: 'John Doe',
             holderEmail: 'customer@latike.com',
-            scannedAt: new Date('2024-05-10T18:30:00Z'),
+            scannedAt: at(-20, 18, 30),
           },
         },
         payment: {
@@ -324,17 +348,16 @@ async function main() {
     prisma.order.create({
       data: {
         userId: customerUser.id,
-        eventId: eventsWithTicketTypes[0].id,
+        eventId: summerFestival.id,
         totalAmount: 75,
         serviceFee: 3.75,
         platformFee: 3.75,
         status: 'COMPLETED',
         tickets: {
           create: {
-            eventId: eventsWithTicketTypes[0].id,
-            ticketTypeId: eventsWithTicketTypes[0].ticketTypes[1].id,
-            qrCode: 'LAT-2024-000004',
-            qrHash: crypto.createHash('sha256').update('LAT-2024-000004').digest('hex'),
+            eventId: summerFestival.id,
+            ticketTypeId: summerFestival.ticketTypes[1].id,
+            ...seedTicket(),
             holderName: 'John Doe',
             holderEmail: 'customer@latike.com',
           },
@@ -366,9 +389,9 @@ async function main() {
   // Create some check-ins
   await prisma.checkIn.create({
     data: {
-      ticketId: ordersWithTickets[2].tickets[0].id,
+      ticketId: ordersWithTickets.find((o) => o.id === orders[2].id)!.tickets[0].id,
       scannedBy: hostUser.id,
-      scannedAt: new Date('2024-05-10T18:30:00Z'),
+      scannedAt: at(-20, 18, 30),
       location: 'Main Entrance',
       deviceInfo: 'iPhone 14 Pro',
     },
@@ -400,7 +423,7 @@ async function main() {
   console.log(`   Users: ${3}`);
   console.log(`   Events: ${events.length}`);
   console.log(`   Orders: ${orders.length}`);
-  console.log(`   Ticket Types: ${events.reduce((acc, event) => acc + event.ticketTypes.length, 0)}`);
+  console.log(`   Ticket Types: ${eventsWithTicketTypes.reduce((acc, event) => acc + event.ticketTypes.length, 0)}`);
   console.log('\n🔑 Test Accounts:');
   console.log(`   Customer: customer@latike.com / password123`);
   console.log(`   Host: host@latike.com / password123`);

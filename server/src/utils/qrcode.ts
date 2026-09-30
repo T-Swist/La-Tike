@@ -1,31 +1,33 @@
 import QRCode from 'qrcode';
 import crypto from 'crypto';
+import env from '../config/env';
 
-export const generateQRHash = (ticketId: string, eventId: string): string => {
-  const secret = process.env.QR_SECRET_KEY || 'default-secret';
-  const data = `${ticketId}-${eventId}`;
-  return crypto.createHmac('sha256', secret).update(data).digest('hex');
+// QR payload format: LT1.<ticketId>.<signature>
+// "." is used as the separator because ticket ids are UUIDs, which contain "-".
+const PREFIX = 'LT1';
+
+export const generateQRHash = (ticketId: string): string => {
+  return crypto.createHmac('sha256', env.QR_SECRET_KEY).update(ticketId).digest('hex');
 };
 
-export const generateQRCodeData = (ticketId: string, eventId: string): string => {
-  const hash = generateQRHash(ticketId, eventId);
-  return `${ticketId}-${eventId}-${hash}`;
+export const generateQRCodeData = (ticketId: string): string => {
+  return `${PREFIX}.${ticketId}.${generateQRHash(ticketId)}`;
 };
 
-export const verifyQRCode = (qrData: string): { ticketId: string; eventId: string; isValid: boolean } => {
-  const parts = qrData.split('-');
-  
-  if (parts.length !== 3) {
-    return { ticketId: '', eventId: '', isValid: false };
+export const verifyQRCode = (qrData: string): { ticketId: string; isValid: boolean } => {
+  const parts = qrData.trim().split('.');
+
+  if (parts.length !== 3 || parts[0] !== PREFIX) {
+    return { ticketId: '', isValid: false };
   }
 
-  const [ticketId, eventId, hash] = parts;
-  const expectedHash = generateQRHash(ticketId, eventId);
-  
+  const [, ticketId, hash] = parts;
+  const expected = Buffer.from(generateQRHash(ticketId), 'hex');
+  const actual = Buffer.from(hash, 'hex');
+
   return {
     ticketId,
-    eventId,
-    isValid: hash === expectedHash,
+    isValid: actual.length === expected.length && crypto.timingSafeEqual(actual, expected),
   };
 };
 

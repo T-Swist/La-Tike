@@ -1,13 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 import logger from '../config/logger';
 import { sendError } from '../utils/response';
+import { AppError } from '../utils/AppError';
 
 export const errorHandler = (
   err: any,
   req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): void => {
+  if (err instanceof AppError) {
+    if (err.statusCode >= 500) {
+      logger.error(err.message, { stack: err.stack, path: req.path, method: req.method });
+    }
+    sendError(res, err.message, err.statusCode, err.code ? [{ code: err.code }] : undefined);
+    return;
+  }
+
   logger.error('Error:', {
     message: err.message,
     stack: err.stack,
@@ -15,18 +24,18 @@ export const errorHandler = (
     method: req.method,
   });
 
-  if (err.name === 'ValidationError') {
-    sendError(res, 'Validation failed', 400, err.errors);
+  if (err.type === 'entity.parse.failed') {
+    sendError(res, 'Malformed JSON body', 400);
     return;
   }
 
-  if (err.name === 'JsonWebTokenError') {
-    sendError(res, 'Invalid token', 401);
+  if (err instanceof Error && err.message === 'Only image files are allowed') {
+    sendError(res, err.message, 400);
     return;
   }
 
-  if (err.name === 'TokenExpiredError') {
-    sendError(res, 'Token expired', 401);
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    sendError(res, 'File is too large', 413);
     return;
   }
 

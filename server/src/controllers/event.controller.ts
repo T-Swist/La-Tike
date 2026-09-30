@@ -7,67 +7,49 @@ const eventService = new EventService();
 
 export class EventController {
   async createEvent(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const event = await eventService.createEvent(req.user!.id, req.body);
-      sendSuccess(res, event, 'Event created successfully', 201);
-    } catch (error: any) {
-      sendError(res, error.message, 400);
-    }
+    const event = await eventService.createEvent(req.user!.id, req.body);
+    sendSuccess(res, event, 'Event created successfully', 201);
   }
 
   async getEvents(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const { category, status, search, page, limit } = req.query;
-      const result = await eventService.getEvents({
-        category: category as string,
-        status: status as string,
-        search: search as string,
-        page: page ? parseInt(page as string) : undefined,
-        limit: limit ? parseInt(limit as string) : undefined,
-      });
-      sendPaginated(res, result.events, result.page, result.limit, result.total);
-    } catch (error: any) {
-      sendError(res, error.message, 400);
-    }
+    const { category, status, search, upcoming, page, limit } = req.query;
+    const result = await eventService.getEvents({
+      category: category as string,
+      status: status as string,
+      search: search as string,
+      upcoming: upcoming === 'true',
+      page: page ? parseInt(page as string) : undefined,
+      limit: limit ? parseInt(limit as string) : undefined,
+    });
+    sendPaginated(res, result.events, result.page, result.limit, result.total);
+  }
+
+  async getMyEvents(req: AuthRequest, res: Response): Promise<void> {
+    const events = await eventService.getHostEvents(req.user!.id);
+    sendSuccess(res, events, 'Events retrieved');
   }
 
   async getEventById(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const event = await eventService.getEventById(req.params.id);
-      sendSuccess(res, event, 'Event retrieved');
-    } catch (error: any) {
-      sendError(res, error.message, 404);
-    }
+    const event = await eventService.getEventById(req.params.id, req.user);
+    sendSuccess(res, event, 'Event retrieved');
   }
 
   async updateEvent(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      const event = await eventService.updateEvent(req.params.id, req.user!.id, req.body);
-      sendSuccess(res, event, 'Event updated successfully');
-    } catch (error: any) {
-      sendError(res, error.message, 400);
-    }
+    const event = await eventService.updateEvent(req.params.id, req.user!, req.body);
+    sendSuccess(res, event, 'Event updated successfully');
   }
 
   async deleteEvent(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      await eventService.deleteEvent(req.params.id, req.user!.id);
-      sendSuccess(res, null, 'Event deleted successfully');
-    } catch (error: any) {
-      sendError(res, error.message, 400);
-    }
+    await eventService.deleteEvent(req.params.id, req.user!);
+    sendSuccess(res, null, 'Event deleted successfully');
   }
 
   async uploadImage(req: AuthRequest, res: Response): Promise<void> {
-    try {
-      if (!req.file) {
-        sendError(res, 'No file uploaded', 400);
-        return;
-      }
-      const imageUrl = await eventService.uploadImage(req.file);
-      sendSuccess(res, { url: imageUrl }, 'Image uploaded successfully');
-    } catch (error: any) {
-      sendError(res, error.message, 400);
+    if (!req.file) {
+      sendError(res, 'No file uploaded', 400);
+      return;
     }
+    const imageUrl = await eventService.uploadImage(req.file);
+    sendSuccess(res, { url: imageUrl }, 'Image uploaded successfully');
   }
 }

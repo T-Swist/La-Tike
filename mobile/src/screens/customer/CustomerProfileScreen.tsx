@@ -1,15 +1,17 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Alert } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
-import { logout } from '../../store/slices/authSlice';
+import { logout, switchMode } from '../../store/slices/authSlice';
+import { useLogoutMutation } from '../../store/api/baseApi';
 import { RootState } from '../../store';
 import { useTheme } from '../../theme';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function CustomerProfileScreen() {
   const dispatch = useDispatch();
-  const user = useSelector((state: RootState) => state.auth.user);
+  const { user, userMode } = useSelector((state: RootState) => state.auth);
+  const [logoutRequest] = useLogoutMutation();
   const { theme, themeMode, toggleTheme } = useTheme();
+  const canHost = user?.role === 'HOST' || user?.role === 'ADMIN';
 
   const styles = createStyles(theme);
 
@@ -23,7 +25,8 @@ export default function CustomerProfileScreen() {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.removeItem('user');
+            // Revoke the refresh token on the server; log out locally even if offline.
+            await logoutRequest().unwrap().catch(() => {});
             dispatch(logout());
           },
         },
@@ -68,7 +71,19 @@ export default function CustomerProfileScreen() {
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account</Text>
-        
+
+        {canHost && (
+          <TouchableOpacity
+            style={styles.menuItem}
+            onPress={() => dispatch(switchMode(userMode === 'host' ? 'customer' : 'host'))}
+          >
+            <Text style={styles.menuText}>
+              {userMode === 'host' ? 'Switch to Customer Mode' : 'Switch to Host Mode'}
+            </Text>
+            <Text style={styles.menuArrow}>›</Text>
+          </TouchableOpacity>
+        )}
+
         <TouchableOpacity style={styles.menuItem}>
           <Text style={styles.menuText}>Edit Profile</Text>
           <Text style={styles.menuArrow}>›</Text>

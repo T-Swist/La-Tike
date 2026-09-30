@@ -1,57 +1,57 @@
 import { baseApi } from '../baseApi';
+import type {
+  ApiResponse,
+  ConfirmPaymentResponse,
+  Event,
+  PurchaseRequest,
+  PurchaseResponse,
+  Ticket,
+} from '../../../types/api';
 
 // Customer-specific API endpoints
 export const customerApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     // Browse events
-    getEvents: builder.query({
+    getEvents: builder.query<Event[], { search?: string; category?: string; upcoming?: boolean } | void>({
       query: (params) => ({
         url: '/events',
-        params,
+        params: { upcoming: true, limit: 50, ...(params ?? {}) },
       }),
+      transformResponse: (response: ApiResponse<Event[]>) => response.data,
       providesTags: ['Events'],
     }),
-    
-    getEventById: builder.query({
+
+    getEventById: builder.query<Event, string>({
       query: (id) => `/events/${id}`,
-      providesTags: ['Events'],
+      transformResponse: (response: ApiResponse<Event>) => response.data,
+      providesTags: (_result, _error, id) => [{ type: 'Events', id }],
     }),
-    
-    searchEvents: builder.query({
-      query: (searchTerm) => ({
-        url: '/events',
-        params: { search: searchTerm },
-      }),
-      providesTags: ['Events'],
-    }),
-    
+
     // Purchase tickets
-    purchaseTicket: builder.mutation({
+    purchaseTicket: builder.mutation<PurchaseResponse, PurchaseRequest>({
       query: (data) => ({
         url: '/tickets/purchase',
         method: 'POST',
         body: data,
       }),
-      invalidatesTags: ['Tickets'],
+      transformResponse: (response: ApiResponse<PurchaseResponse>) => response.data,
+      invalidatesTags: ['Tickets', 'Events'],
     }),
-    
-    confirmPayment: builder.mutation({
+
+    confirmPayment: builder.mutation<ConfirmPaymentResponse, { paymentIntentId: string }>({
       query: (data) => ({
         url: '/tickets/confirm-payment',
         method: 'POST',
         body: data,
       }),
-      invalidatesTags: ['Tickets'],
+      transformResponse: (response: ApiResponse<ConfirmPaymentResponse>) => response.data,
+      invalidatesTags: ['Tickets', 'Events'],
     }),
-    
+
     // My tickets
-    getMyTickets: builder.query({
+    getMyTickets: builder.query<Ticket[], void>({
       query: () => '/tickets/my-tickets',
-      providesTags: ['Tickets'],
-    }),
-    
-    getTicketById: builder.query({
-      query: (id) => `/tickets/${id}`,
+      transformResponse: (response: ApiResponse<Ticket[]>) => response.data,
       providesTags: ['Tickets'],
     }),
   }),
@@ -60,9 +60,7 @@ export const customerApi = baseApi.injectEndpoints({
 export const {
   useGetEventsQuery,
   useGetEventByIdQuery,
-  useSearchEventsQuery,
   usePurchaseTicketMutation,
   useConfirmPaymentMutation,
   useGetMyTicketsQuery,
-  useGetTicketByIdQuery,
 } = customerApi;

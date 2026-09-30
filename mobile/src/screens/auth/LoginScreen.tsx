@@ -15,9 +15,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useDispatch } from 'react-redux';
 import { useLoginMutation } from '../../store/api/baseApi';
 import { setCredentials } from '../../store/slices/authSlice';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthStackParamList } from '../../navigation/AuthNavigator';
 import { useTheme } from '../../theme';
+import { getErrorMessage } from '../../utils/errors';
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'Login'>;
 
@@ -37,12 +37,9 @@ export default function LoginScreen() {
     }
 
     try {
-      const result = await login({ email, password }).unwrap();
+      const result = await login({ email: email.trim(), password }).unwrap();
       
       const { user, accessToken, refreshToken } = result.data;
-
-      // Store user data in AsyncStorage
-      await AsyncStorage.setItem('user', JSON.stringify(user));
 
       // Update Redux state
       dispatch(setCredentials({ user, accessToken, refreshToken }));
@@ -51,7 +48,7 @@ export default function LoginScreen() {
     } catch (error: any) {
       Alert.alert(
         'Login Failed',
-        error?.data?.message || 'Invalid email or password'
+        getErrorMessage(error, 'Invalid email or password')
       );
     }
   };

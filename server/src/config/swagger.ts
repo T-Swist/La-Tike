@@ -1,3 +1,4 @@
+import path from 'path';
 import swaggerJsdoc from 'swagger-jsdoc';
 
 const options: swaggerJsdoc.Options = {
@@ -37,7 +38,8 @@ const options: swaggerJsdoc.Options = {
       },
     ],
   },
-  apis: ['./src/routes/*.ts', './src/controllers/*.ts'],
+  // Resolved from this file so it works both with ts-node (src) and the compiled build (dist).
+  apis: [path.join(__dirname, '../routes/*.{ts,js}')],
 };
 
 const swaggerSpec = swaggerJsdoc(options);

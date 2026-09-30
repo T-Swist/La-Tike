@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -8,59 +8,106 @@ import {
   FlatList,
   SafeAreaView,
   Alert,
+  Platform,
+  Vibration,
+  ActivityIndicator,
 } from 'react-native';
+import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
+import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { useTheme } from '../../theme';
+import { useScanTicketMutation } from '../../store/api/host/hostApi';
+import { HostTabParamList } from '../../navigation/HostNavigator';
+import type { ScanResponse, ScanResultCode } from '../../types/api';
+import { getErrorMessage } from '../../utils/errors';
 
 interface ScanResult {
   id: string;
   ticketCode: string;
   eventTitle: string;
   attendeeName: string;
+  ticketType: string;
   timestamp: string;
-  status: 'valid' | 'invalid' | 'already_used';
+  status: ScanResultCode;
+  message: string;
 }
 
-const MOCK_SCAN_HISTORY: ScanResult[] = [
-  {
-    id: '1',
-    ticketCode: 'QR-12345',
-    eventTitle: 'Summer Music Festival',
-    attendeeName: 'John Doe',
-    timestamp: new Date().toISOString(),
-    status: 'valid',
-  },
-  {
-    id: '2',
-    ticketCode: 'QR-67890',
-    eventTitle: 'Summer Music Festival',
-    attendeeName: 'Jane Smith',
-    timestamp: new Date(Date.now() - 300000).toISOString(),
-    status: 'valid',
-  },
-  {
-    id: '3',
-    ticketCode: 'QR-11111',
-    eventTitle: 'Summer Music Festival',
-    attendeeName: 'Bob Johnson',
-    timestamp: new Date(Date.now() - 600000).toISOString(),
-    status: 'already_used',
-  },
-];
+// Ignore repeated reads of the same code while the result is on screen.
+const RESCAN_DELAY_MS = 2500;
 
 export default function HostScannerScreen() {
   const { theme } = useTheme();
+  const navigation = useNavigation();
+  const route = useRoute<RouteProp<HostTabParamList, 'Scanner'>>();
+  const eventId = route.params?.eventId;
+  const eventTitle = route.params?.eventTitle;
+
+  const [permission, requestPermission] = useCameraPermissions();
+  const [scanTicket, { isLoading }] = useScanTicketMutation();
   const [manualCode, setManualCode] = useState('');
-  const [scanHistory, setScanHistory] = useState<ScanResult[]>(MOCK_SCAN_HISTORY);
+  const [scanHistory, setScanHistory] = useState<ScanResult[]>([]);
+  const [lastResult, setLastResult] = useState<ScanResult | null>(null);
   const [isScannerActive, setIsScannerActive] = useState(false);
+  const isProcessing = useRef(false);
 
   const styles = createStyles(theme);
 
-  const handleScan = (code: string) => {
-    // TODO: Implement actual QR scanning with expo-barcode-scanner
-    // For now, simulate a scan
-    Alert.alert('Ticket Scanned', `Code: ${code}`, [
-      { text: 'OK', onPress: () => console.log('Scan confirmed') },
-    ]);
+  // Turn the camera off when leaving the tab.
+  useFocusEffect(
+    useCallback(() => () => setIsScannerActive(false), [])
+  );
+
+  const handleScan = async (code: string) => {
+    if (isProcessing.current) return;
+    isProcessing.current = true;
+
+    try {
+      const response: ScanResponse = await scanTicket({
+        qrCode: code.trim(),
+        eventId,
+        deviceInfo: `${Platform.OS} ${Platform.Version}`,
+      }).unwrap();
+
+      const result: ScanResult = {
+        id: `${Date.now()}`,
+        ticketCode: response.ticket?.id.slice(0, 8).toUpperCase() ?? '—',
+        eventTitle: response.ticket?.eventTitle ?? '',
+        attendeeName: response.ticket?.attendeeName ?? 'Unknown ticket',
+        ticketType: response.ticket?.ticketType ?? '',
+        timestamp: new Date().toISOString(),
+        status: response.result,
+        message: response.message,
+      };
+
+      Vibration.vibrate(response.valid ? 100 : [0, 150, 100, 150]);
+      setLastResult(result);
+      setScanHistory((history) => [result, ...history].slice(0, 50));
+    } catch (error) {
+      Alert.alert('Scan failed', getErrorMessage(error));
+    } finally {
+      setTimeout(() => {
+        isProcessing.current = false;
+      }, RESCAN_DELAY_MS);
+    }
+  };
+
+  const onBarcodeScanned = ({ data }: BarcodeScanningResult) => {
+    handleScan(data);
+  };
+
+  const toggleScanner = async () => {
+    if (isScannerActive) {
+      setIsScannerActive(false);
+      return;
+    }
+    if (!permission?.granted) {
+      const response = await requestPermission();
+      if (!response.granted) {
+        Alert.alert('Camera access needed', 'Allow camera access in Settings to scan tickets.');
+        return;
+      }
+    }
+    setLastResult(null);
+    setIsScannerActive(true);
   };
 
   const handleManualEntry = () => {
@@ -68,33 +115,37 @@ export default function HostScannerScreen() {
       Alert.alert('Error', 'Please enter a ticket code');
       return;
     }
+    isProcessing.current = false;
     handleScan(manualCode);
     setManualCode('');
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: ScanResultCode) => {
     switch (status) {
-      case 'valid':
+      case 'VALID':
         return theme.success;
-      case 'invalid':
-        return theme.error;
-      case 'already_used':
+      case 'ALREADY_USED':
         return theme.warning;
       default:
-        return theme.textMuted;
+        return theme.error;
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: ScanResultCode) => {
     switch (status) {
-      case 'valid':
+      case 'VALID':
         return 'Valid ✓';
-      case 'invalid':
-        return 'Invalid ✗';
-      case 'already_used':
+      case 'ALREADY_USED':
         return 'Already Used';
+      case 'NOT_YOUR_EVENT':
+      case 'WRONG_EVENT':
+        return 'Wrong Event';
+      case 'CANCELLED':
+        return 'Cancelled';
+      case 'REFUNDED':
+        return 'Refunded';
       default:
-        return status;
+        return 'Invalid ✗';
     }
   };
 
@@ -103,36 +154,69 @@ export default function HostScannerScreen() {
       <View style={styles.scanResultHeader}>
         <View style={styles.scanResultInfo}>
           <Text style={styles.scanResultName}>{item.attendeeName}</Text>
-          <Text style={styles.scanResultCode}>{item.ticketCode}</Text>
+          <Text style={styles.scanResultCode}>
+            {item.ticketType ? `${item.ticketType} · ` : ''}#{item.ticketCode}
+          </Text>
         </View>
         <View style={[styles.scanStatusBadge, { backgroundColor: getStatusColor(item.status) }]}>
           <Text style={styles.scanStatusText}>{getStatusText(item.status)}</Text>
         </View>
       </View>
-      <Text style={styles.scanResultEvent}>{item.eventTitle}</Text>
+      <Text style={styles.scanResultEvent}>{item.eventTitle || item.message}</Text>
       <Text style={styles.scanResultTime}>
         {new Date(item.timestamp).toLocaleTimeString()} • {new Date(item.timestamp).toLocaleDateString()}
       </Text>
     </View>
   );
 
+  const admittedCount = scanHistory.filter((scan) => scan.status === 'VALID').length;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Ticket Scanner</Text>
-        <Text style={styles.headerSubtitle}>Scan or enter ticket codes</Text>
+        <Text style={styles.headerSubtitle}>
+          {eventTitle ? `Scanning for ${eventTitle}` : 'Scanning for all your events'}
+        </Text>
+        {eventId && (
+          <TouchableOpacity onPress={() => navigation.setParams({ eventId: undefined, eventTitle: undefined } as never)}>
+            <Text style={styles.clearFilterText}>Scan all events instead</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Scanner Area */}
       <View style={styles.scannerContainer}>
         <View style={styles.scannerFrame}>
-          <View style={styles.scannerPlaceholder}>
-            <Text style={styles.scannerIcon}>📷</Text>
-            <Text style={styles.scannerText}>
-              {isScannerActive ? 'Point camera at QR code' : 'Tap to activate scanner'}
-            </Text>
-          </View>
-          
+          {isScannerActive ? (
+            <CameraView
+              style={StyleSheet.absoluteFill}
+              facing="back"
+              barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+              onBarcodeScanned={onBarcodeScanned}
+            />
+          ) : (
+            <View style={styles.scannerPlaceholder}>
+              <Text style={styles.scannerIcon}>📷</Text>
+              <Text style={styles.scannerText}>Tap Start Scanner to scan a ticket</Text>
+            </View>
+          )}
+
+          {lastResult && (
+            <View style={[styles.resultBanner, { backgroundColor: getStatusColor(lastResult.status) }]}>
+              <Text style={styles.resultBannerTitle}>{getStatusText(lastResult.status)}</Text>
+              <Text style={styles.resultBannerText} numberOfLines={2}>
+                {lastResult.status === 'VALID' ? lastResult.attendeeName : lastResult.message}
+              </Text>
+            </View>
+          )}
+
+          {isLoading && (
+            <View style={styles.loadingOverlay}>
+              <ActivityIndicator size="large" color="#fff" />
+            </View>
+          )}
+
           {/* Scanner corners */}
           <View style={[styles.scannerCorner, styles.scannerCornerTL]} />
           <View style={[styles.scannerCorner, styles.scannerCornerTR]} />
@@ -140,10 +224,7 @@ export default function HostScannerScreen() {
           <View style={[styles.scannerCorner, styles.scannerCornerBR]} />
         </View>
 
-        <TouchableOpacity
-          style={styles.scanButton}
-          onPress={() => setIsScannerActive(!isScannerActive)}
-        >
+        <TouchableOpacity style={styles.scanButton} onPress={toggleScanner}>
           <Text style={styles.scanButtonText}>
             {isScannerActive ? 'Stop Scanner' : 'Start Scanner'}
           </Text>
@@ -152,15 +233,16 @@ export default function HostScannerScreen() {
 
       {/* Manual Entry */}
       <View style={styles.manualEntryContainer}>
-        <Text style={styles.manualEntryLabel}>Or enter code manually</Text>
+        <Text style={styles.manualEntryLabel}>Or paste the ticket code</Text>
         <View style={styles.manualEntryRow}>
           <TextInput
             style={styles.manualEntryInput}
-            placeholder="Enter ticket code..."
+            placeholder="LT1.…"
             placeholderTextColor={theme.placeholder}
             value={manualCode}
             onChangeText={setManualCode}
-            autoCapitalize="characters"
+            autoCapitalize="none"
+            autoCorrect={false}
           />
           <TouchableOpacity style={styles.manualEntryButton} onPress={handleManualEntry}>
             <Text style={styles.manualEntryButtonText}>Verify</Text>
@@ -172,7 +254,7 @@ export default function HostScannerScreen() {
       <View style={styles.historyContainer}>
         <View style={styles.historyHeader}>
           <Text style={styles.historyTitle}>Recent Scans</Text>
-          <Text style={styles.historyCount}>{scanHistory.length} scans today</Text>
+          <Text style={styles.historyCount}>{admittedCount} admitted this session</Text>
         </View>
 
         <FlatList
@@ -195,6 +277,34 @@ export default function HostScannerScreen() {
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
+  clearFilterText: {
+    fontSize: 13,
+    color: theme.primary,
+    marginTop: 6,
+  },
+  resultBanner: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    borderRadius: 12,
+    padding: 12,
+  },
+  resultBannerTitle: {
+    fontSize: 18,
+    color: '#fff',
+  },
+  resultBannerText: {
+    fontSize: 14,
+    color: '#fff',
+    marginTop: 2,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: theme.background,

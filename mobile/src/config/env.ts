@@ -1,26 +1,28 @@
-// Environment configuration
-// Update these values based on your environment
+import Constants from 'expo-constants';
+import { Platform } from 'react-native';
 
-const ENV = {
-  // Development
-  DEV: {
-    API_URL: 'http://localhost:5000/api/v1',
-    WS_URL: 'ws://localhost:5000',
-  },
-  // Production (update with your actual backend URL)
-  PROD: {
-    API_URL: 'https://api.latike.com/api/v1',
-    WS_URL: 'wss://api.latike.com',
-  },
+const API_PORT = 5000;
+
+// During development, reuse the IP of the computer running Metro so the app
+// can reach the API from a real phone on the same Wi-Fi without extra config.
+const devApiUrl = (): string => {
+  const host = Constants.expoConfig?.hostUri?.split(':')[0];
+  if (host) {
+    return `http://${host}:${API_PORT}/api/v1`;
+  }
+  // Android emulators reach the host machine through 10.0.2.2
+  const fallbackHost = Platform.OS === 'android' ? '10.0.2.2' : 'localhost';
+  return `http://${fallbackHost}:${API_PORT}/api/v1`;
 };
 
-// Determine current environment
-const isDevelopment = __DEV__;
+// EXPO_PUBLIC_API_URL is inlined at build time (set per profile in eas.json).
+const API_URL =
+  process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? devApiUrl() : 'https://api.latike.com/api/v1');
 
 export const config = {
-  API_URL: isDevelopment ? ENV.DEV.API_URL : ENV.PROD.API_URL,
-  WS_URL: isDevelopment ? ENV.DEV.WS_URL : ENV.PROD.WS_URL,
-  IS_DEV: isDevelopment,
+  API_URL,
+  CURRENCY: process.env.EXPO_PUBLIC_CURRENCY || 'PLN',
+  IS_DEV: __DEV__,
 };
 
 export default config;

@@ -18,7 +18,16 @@ export interface EmailOptions {
   attachments?: any[];
 }
 
+const emailConfigured = () =>
+  !!process.env.EMAIL_HOST &&
+  !!process.env.EMAIL_USER &&
+  !/your[-_]/i.test(`${process.env.EMAIL_USER}${process.env.EMAIL_PASSWORD}`);
+
 export const sendEmail = async (options: EmailOptions): Promise<void> => {
+  if (!emailConfigured()) {
+    logger.info(`Email not configured, skipping "${options.subject}" to ${options.to}`);
+    return;
+  }
   try {
     await transporter.sendMail({
       from: process.env.EMAIL_FROM || 'noreply@latike.com',

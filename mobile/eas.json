@@ -1,0 +1,28 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "http://192.168.100.35:5000/api/v1",
+        "EXPO_PUBLIC_CURRENCY": "PLN"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.latike.com/api/v1",
+        "EXPO_PUBLIC_CURRENCY": "PLN"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

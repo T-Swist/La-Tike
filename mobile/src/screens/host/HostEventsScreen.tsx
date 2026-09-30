@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,80 +6,55 @@ import {
   FlatList,
   TouchableOpacity,
   SafeAreaView,
+  Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useTheme } from '../../theme';
-import { useGetMyEventsQuery } from '../../store/api/host/hostApi';
+import { useGetMyEventsQuery, useUpdateEventMutation } from '../../store/api/host/hostApi';
+import { HostTabParamList } from '../../navigation/HostNavigator';
+import type { HostEvent } from '../../types/api';
+import { formatDate, formatPrice } from '../../utils/format';
+import { getErrorMessage } from '../../utils/errors';
 
-interface HostEvent {
-  id: string;
-  title: string;
-  date: string;
-  location: string;
-  ticketsSold: number;
-  totalTickets: number;
-  revenue: number;
-  status: 'upcoming' | 'ongoing' | 'completed' | 'cancelled';
-  category: string;
-}
+type DisplayStatus = 'draft' | 'upcoming' | 'ongoing' | 'completed' | 'cancelled';
 
-const MOCK_EVENTS: HostEvent[] = [
-  {
-    id: '1',
-    title: 'Summer Music Festival',
-    date: '2024-06-15',
-    location: 'Warsaw',
-    ticketsSold: 850,
-    totalTickets: 1200,
-    revenue: 127500,
-    status: 'upcoming',
-    category: 'Music',
-  },
-  {
-    id: '2',
-    title: 'Art Gallery Opening',
-    date: '2024-06-20',
-    location: 'Krakow',
-    ticketsSold: 120,
-    totalTickets: 350,
-    revenue: 0,
-    status: 'upcoming',
-    category: 'Arts',
-  },
-  {
-    id: '3',
-    title: 'Food & Wine Tasting',
-    date: '2024-05-10',
-    location: 'Gdansk',
-    ticketsSold: 80,
-    totalTickets: 80,
-    revenue: 16000,
-    status: 'completed',
-    category: 'Food',
-  },
-];
+const displayStatus = (event: HostEvent): DisplayStatus => {
+  const now = new Date();
+  if (event.status === 'DRAFT') return 'draft';
+  if (event.status === 'CANCELLED') return 'cancelled';
+  if (event.status === 'COMPLETED' || new Date(event.endDate) < now) return 'completed';
+  return new Date(event.startDate) <= now ? 'ongoing' : 'upcoming';
+};
 
 export default function HostEventsScreen() {
   const { theme } = useTheme();
+  const navigation = useNavigation<BottomTabNavigationProp<HostTabParamList>>();
   const [selectedTab, setSelectedTab] = useState<'active' | 'past'>('active');
-  
-  // TODO: Replace with real API call when backend is ready
-  // const { data: events, isLoading } = useGetMyEventsQuery();
-  const allEvents = MOCK_EVENTS;
+
+  const { data: allEvents = [], isLoading, isFetching, error, refetch } = useGetMyEventsQuery();
+  const [updateEvent] = useUpdateEventMutation();
 
   const styles = createStyles(theme);
 
-  const activeEvents = allEvents.filter(
-    event => event.status === 'upcoming' || event.status === 'ongoing'
+  const activeEvents = useMemo(
+    () => allEvents.filter(event => ['draft', 'upcoming', 'ongoing'].includes(displayStatus(event))).reverse(),
+    [allEvents]
   );
-  
-  const pastEvents = allEvents.filter(
-    event => event.status === 'completed' || event.status === 'cancelled'
+
+  const pastEvents = useMemo(
+    () => allEvents.filter(event => ['completed', 'cancelled'].includes(displayStatus(event))),
+    [allEvents]
   );
 
   const displayedEvents = selectedTab === 'active' ? activeEvents : pastEvents;
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status: DisplayStatus) => {
     switch (status) {
+      case 'draft':
+        return theme.warning;
       case 'upcoming':
         return theme.primary;
       case 'ongoing':
@@ -93,8 +68,10 @@ export default function HostEventsScreen() {
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: DisplayStatus) => {
     switch (status) {
+      case 'draft':
+        return 'Draft';
       case 'upcoming':
         return 'Upcoming';
       case 'ongoing':
@@ -108,15 +85,40 @@ export default function HostEventsScreen() {
     }
   };
 
+  const changeStatus = (event: HostEvent, status: 'PUBLISHED' | 'CANCELLED') => {
+    const verb = status === 'PUBLISHED' ? 'Publish' : 'Cancel';
+    Alert.alert(
+      `${verb} event?`,
+      status === 'PUBLISHED'
+        ? `"${event.title}" will become visible and tickets go on sale.`
+        : `"${event.title}" will be marked as cancelled. Ticket holders are not refunded automatically.`,
+      [
+        { text: 'Back', style: 'cancel' },
+        {
+          text: verb,
+          style: status === 'CANCELLED' ? 'destructive' : 'default',
+          onPress: async () => {
+            try {
+              await updateEvent({ id: event.id, status }).unwrap();
+            } catch (err) {
+              Alert.alert('Update failed', getErrorMessage(err));
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const calculateProgress = (sold: number, total: number) => {
-    return Math.round((sold / total) * 100);
+    return total ? Math.round((sold / total) * 100) : 0;
   };
 
   const renderEventCard = ({ item }: { item: HostEvent }) => {
-    const progress = calculateProgress(item.ticketsSold, item.totalTickets);
-    
+    const status = displayStatus(item);
+    const progress = calculateProgress(item.stats.ticketsSold, item.stats.totalTickets);
+
     return (
-      <TouchableOpacity style={styles.eventCard}>
+      <View style={styles.eventCard}>
         <View style={styles.eventHeader}>
           <View style={styles.eventInfo}>
             <Text style={styles.eventTitle} numberOfLines={2}>
@@ -124,42 +126,35 @@ export default function HostEventsScreen() {
             </Text>
             <Text style={styles.eventCategory}>{item.category}</Text>
           </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-            <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(status) }]}>
+            <Text style={styles.statusText}>{getStatusText(status)}</Text>
           </View>
         </View>
 
         <View style={styles.eventDetails}>
           <View style={styles.detailRow}>
             <Text style={styles.detailIcon}>📅</Text>
-            <Text style={styles.detailText}>
-              {new Date(item.date).toLocaleDateString('en-US', {
-                weekday: 'short',
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </Text>
+            <Text style={styles.detailText}>{formatDate(item.startDate)}</Text>
           </View>
           <View style={styles.detailRow}>
             <Text style={styles.detailIcon}>📍</Text>
-            <Text style={styles.detailText}>{item.location}</Text>
+            <Text style={styles.detailText}>{item.city || item.location}</Text>
           </View>
         </View>
 
         <View style={styles.statsContainer}>
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{item.ticketsSold}/{item.totalTickets}</Text>
+            <Text style={styles.statValue}>{item.stats.ticketsSold}/{item.stats.totalTickets}</Text>
             <Text style={styles.statLabel}>Tickets Sold</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{progress}%</Text>
-            <Text style={styles.statLabel}>Sold</Text>
+            <Text style={styles.statValue}>{item.stats.checkedIn}</Text>
+            <Text style={styles.statLabel}>Checked In</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
-            <Text style={styles.statValue}>{item.revenue.toLocaleString()} PLN</Text>
+            <Text style={styles.statValue}>{formatPrice(item.stats.revenue)}</Text>
             <Text style={styles.statLabel}>Revenue</Text>
           </View>
         </View>
@@ -170,15 +165,31 @@ export default function HostEventsScreen() {
           </View>
         </View>
 
-        <View style={styles.eventActions}>
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.actionButtonText}>View Details</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionButton, styles.actionButtonSecondary]}>
-            <Text style={styles.actionButtonTextSecondary}>Edit</Text>
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
+        {(status === 'draft' || status === 'upcoming' || status === 'ongoing') && (
+          <View style={styles.eventActions}>
+            {status === 'draft' ? (
+              <TouchableOpacity style={styles.actionButton} onPress={() => changeStatus(item, 'PUBLISHED')}>
+                <Text style={styles.actionButtonText}>Publish</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPress={() => navigation.navigate('Scanner', { eventId: item.id, eventTitle: item.title })}
+              >
+                <Text style={styles.actionButtonText}>Scan Tickets</Text>
+              </TouchableOpacity>
+            )}
+            {status !== 'draft' && (
+              <TouchableOpacity
+                style={[styles.actionButton, styles.actionButtonSecondary]}
+                onPress={() => changeStatus(item, 'CANCELLED')}
+              >
+                <Text style={styles.actionButtonTextSecondary}>Cancel Event</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </View>
     );
   };
 
@@ -189,7 +200,10 @@ export default function HostEventsScreen() {
           <Text style={styles.headerTitle}>My Events</Text>
           <Text style={styles.headerSubtitle}>Manage your hosted events</Text>
         </View>
-        <TouchableOpacity style={styles.createButton}>
+        <TouchableOpacity
+          style={styles.createButton}
+          onPress={() => Alert.alert('Coming soon', 'Creating events from the app is not available yet.')}
+        >
           <Text style={styles.createButtonText}>+ Create</Text>
         </TouchableOpacity>
       </View>
@@ -219,23 +233,22 @@ export default function HostEventsScreen() {
         keyExtractor={item => item.id}
         contentContainerStyle={styles.eventsList}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={theme.primary} />
+        }
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateIcon}>🎉</Text>
-            <Text style={styles.emptyStateText}>
-              {selectedTab === 'active' ? 'No active events' : 'No past events'}
-            </Text>
-            <Text style={styles.emptyStateSubtext}>
-              {selectedTab === 'active'
-                ? 'Create your first event to get started!'
-                : 'Your completed events will appear here'}
-            </Text>
-            {selectedTab === 'active' && (
-              <TouchableOpacity style={styles.emptyStateButton}>
-                <Text style={styles.emptyStateButtonText}>Create Event</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+          isLoading ? (
+            <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateText}>
+                {error ? 'Could not load your events' : selectedTab === 'active' ? 'No active events' : 'No past events'}
+              </Text>
+              <Text style={styles.emptyStateSubtext}>
+                {error ? getErrorMessage(error) : 'Events you host will appear here'}
+              </Text>
+            </View>
+          )
         }
       />
     </SafeAreaView>

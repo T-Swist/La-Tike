@@ -1,25 +1,35 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
+import env from './config/env';
 import app from './app';
 import logger from './config/logger';
-import './config/database';
+import prisma from './config/database';
 
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
-  logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
-  logger.info(`🏥 Health Check: http://localhost:${PORT}/health`);
-  logger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+const server = app.listen(env.PORT, () => {
+  logger.info(`🚀 Server running on port ${env.PORT}`);
+  logger.info(`📚 API Documentation: http://localhost:${env.PORT}/api-docs`);
+  logger.info(`🏥 Health Check: http://localhost:${env.PORT}/api/v1/health`);
+  logger.info(`🌍 Environment: ${env.NODE_ENV}`);
+  logger.info(`💳 Payments mode: ${env.paymentsMode}`);
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+const shutdown = (signal: string) => {
+  logger.info(`${signal} received, shutting down`);
+  server.close(async () => {
+    await prisma.$disconnect();
+    process.exit(0);
+  });
+  // Force exit if connections do not drain in time.
+  setTimeout(() => process.exit(1), 10000).unref();
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection', { reason });
   process.exit(1);
 });
 
 process.on('uncaughtException', (error) => {
-  logger.error('Uncaught Exception:', error);
+  logger.error('Uncaught Exception', { message: error.message, stack: error.stack });
   process.exit(1);
 });

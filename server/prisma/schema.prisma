@@ -61,6 +61,7 @@ model User {
 
   @@index([email])
   @@index([role])
+  @@index([refreshToken])
   @@map("users")
 }
 
@@ -132,6 +133,7 @@ model Order {
   serviceFee      Float       @default(0)
   platformFee     Float       @default(0)
   status          OrderStatus @default(PENDING)
+  items           Json?
   paymentId       String?
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt

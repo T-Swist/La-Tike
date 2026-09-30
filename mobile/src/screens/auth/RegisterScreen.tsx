@@ -13,18 +13,15 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useDispatch } from 'react-redux';
 import { useRegisterMutation } from '../../store/api/baseApi';
-import { setCredentials } from '../../store/slices/authSlice';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthStackParamList } from '../../navigation/AuthNavigator';
 import { useTheme } from '../../theme';
+import { getErrorMessage } from '../../utils/errors';
 
 type RegisterScreenNavigationProp = NativeStackNavigationProp<AuthStackParamList, 'Register'>;
 
 export default function RegisterScreen() {
   const navigation = useNavigation<RegisterScreenNavigationProp>();
-  const dispatch = useDispatch();
   const [register, { isLoading }] = useRegisterMutation();
   const { theme } = useTheme();
 
@@ -53,27 +50,22 @@ export default function RegisterScreen() {
       return;
     }
 
-    if (formData.password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    if (formData.password.length < 8) {
+      Alert.alert('Error', 'Password must be at least 8 characters');
       return;
     }
 
     try {
-      const { confirmPassword, ...registerData } = formData;
-      const result = await register(registerData).unwrap();
-      
-      const { user, accessToken, refreshToken } = result.data;
+      const { confirmPassword: _confirm, ...registerData } = formData;
+      const result = await register({ ...registerData, email: registerData.email.trim() }).unwrap();
 
-      await AsyncStorage.setItem('user', JSON.stringify(user));
-      dispatch(setCredentials({ user, accessToken, refreshToken }));
-
-      // Navigate to interest selection
-      navigation.navigate('InterestSelection');
+      // Onboarding signs the user in once it is finished (or skipped).
+      navigation.navigate('InterestSelection', { session: result.data });
 
     } catch (error: any) {
       Alert.alert(
         'Registration Failed',
-        error?.data?.message || 'Could not create account'
+        getErrorMessage(error, 'Could not create account')
       );
     }
   };

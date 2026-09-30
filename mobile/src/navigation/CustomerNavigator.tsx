@@ -1,11 +1,13 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 
-// We'll create these screens next
 import CustomerHomeScreen from '../screens/customer/CustomerHomeScreen';
 import CustomerTicketsScreen from '../screens/customer/CustomerTicketsScreen';
 import CustomerProfileScreen from '../screens/customer/CustomerProfileScreen';
+import EventDetailScreen from '../screens/customer/EventDetailScreen';
+import { useTheme } from '../theme';
 
 export type CustomerTabParamList = {
   Home: undefined;
@@ -13,9 +15,17 @@ export type CustomerTabParamList = {
   Profile: undefined;
 };
 
-const Tab = createBottomTabNavigator<CustomerTabParamList>();
+export type CustomerStackParamList = {
+  Tabs: undefined;
+  EventDetail: { eventId: string };
+};
 
-export default function CustomerNavigator() {
+const Tab = createBottomTabNavigator<CustomerTabParamList>();
+const Stack = createNativeStackNavigator<CustomerStackParamList>();
+
+function CustomerTabs() {
+  const { theme } = useTheme();
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -33,25 +43,35 @@ export default function CustomerNavigator() {
 
           return <Ionicons name={iconName} size={size} color={color} />;
         },
-        tabBarActiveTintColor: '#6366f1',
+        tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: 'gray',
+        tabBarStyle: { backgroundColor: theme.card, borderTopColor: theme.border },
       })}
     >
-      <Tab.Screen 
-        name="Home" 
+      <Tab.Screen
+        name="Home"
         component={CustomerHomeScreen}
         options={{ tabBarLabel: 'Events' }}
       />
-      <Tab.Screen 
-        name="MyTickets" 
+      <Tab.Screen
+        name="MyTickets"
         component={CustomerTicketsScreen}
         options={{ tabBarLabel: 'My Tickets' }}
       />
-      <Tab.Screen 
-        name="Profile" 
+      <Tab.Screen
+        name="Profile"
         component={CustomerProfileScreen}
         options={{ tabBarLabel: 'Profile' }}
       />
     </Tab.Navigator>
+  );
+}
+
+export default function CustomerNavigator() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Tabs" component={CustomerTabs} />
+      <Stack.Screen name="EventDetail" component={EventDetailScreen} />
+    </Stack.Navigator>
   );
 }

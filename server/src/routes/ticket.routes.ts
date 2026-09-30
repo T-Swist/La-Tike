@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { TicketController } from '../controllers/ticket.controller';
 import { authenticate, authorize } from '../middleware/auth';
+import { validate } from '../middleware/validate';
+import { asyncHandler } from '../utils/AppError';
+import { purchaseSchema, confirmPaymentSchema, scanSchema } from '../validators';
 
 const router = Router();
 const ticketController = new TicketController();
@@ -17,7 +20,8 @@ const ticketController = new TicketController();
 router.post(
   '/purchase',
   authenticate,
-  ticketController.purchaseTickets.bind(ticketController)
+  validate(purchaseSchema),
+  asyncHandler(ticketController.purchaseTickets.bind(ticketController))
 );
 
 /**
@@ -32,7 +36,8 @@ router.post(
 router.post(
   '/confirm-payment',
   authenticate,
-  ticketController.confirmPayment.bind(ticketController)
+  validate(confirmPaymentSchema),
+  asyncHandler(ticketController.confirmPayment.bind(ticketController))
 );
 
 /**
@@ -48,7 +53,8 @@ router.post(
   '/scan',
   authenticate,
   authorize('HOST', 'ADMIN'),
-  ticketController.scanTicket.bind(ticketController)
+  validate(scanSchema),
+  asyncHandler(ticketController.scanTicket.bind(ticketController))
 );
 
 /**
@@ -63,7 +69,22 @@ router.post(
 router.get(
   '/my-tickets',
   authenticate,
-  ticketController.getUserTickets.bind(ticketController)
+  asyncHandler(ticketController.getUserTickets.bind(ticketController))
+);
+
+/**
+ * @swagger
+ * /tickets/{id}:
+ *   get:
+ *     summary: Get one of the current user's tickets
+ *     tags: [Tickets]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.get(
+  '/:id',
+  authenticate,
+  asyncHandler(ticketController.getTicketById.bind(ticketController))
 );
 
 export default router;

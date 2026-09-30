@@ -1,6 +1,9 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
 import { authenticate } from '../middleware/auth';
+import { validate } from '../middleware/validate';
+import { asyncHandler } from '../utils/AppError';
+import { registerSchema, loginSchema, refreshSchema } from '../validators';
 
 const router = Router();
 const authController = new AuthController();
@@ -40,7 +43,7 @@ const authController = new AuthController();
  *       201:
  *         description: User registered successfully
  */
-router.post('/register', authController.register.bind(authController));
+router.post('/register', validate(registerSchema), asyncHandler(authController.register.bind(authController)));
 
 /**
  * @swagger
@@ -66,7 +69,7 @@ router.post('/register', authController.register.bind(authController));
  *       200:
  *         description: Login successful
  */
-router.post('/login', authController.login.bind(authController));
+router.post('/login', validate(loginSchema), asyncHandler(authController.login.bind(authController)));
 
 /**
  * @swagger
@@ -75,7 +78,7 @@ router.post('/login', authController.login.bind(authController));
  *     summary: Refresh access token
  *     tags: [Auth]
  */
-router.post('/refresh', authController.refreshToken.bind(authController));
+router.post('/refresh', validate(refreshSchema), asyncHandler(authController.refreshToken.bind(authController)));
 
 /**
  * @swagger
@@ -86,7 +89,7 @@ router.post('/refresh', authController.refreshToken.bind(authController));
  *     security:
  *       - bearerAuth: []
  */
-router.post('/logout', authenticate, authController.logout.bind(authController));
+router.post('/logout', authenticate, asyncHandler(authController.logout.bind(authController)));
 
 /**
  * @swagger
@@ -97,6 +100,6 @@ router.post('/logout', authenticate, authController.logout.bind(authController))
  *     security:
  *       - bearerAuth: []
  */
-router.get('/profile', authenticate, authController.getProfile.bind(authController));
+router.get('/profile', authenticate, asyncHandler(authController.getProfile.bind(authController)));
 
 export default router;

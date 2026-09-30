@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,111 +6,73 @@ import {
   FlatList,
   TouchableOpacity,
   SafeAreaView,
+  Modal,
+  Image,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useTheme } from '../../theme';
 import { useGetMyTicketsQuery } from '../../store/api/customer/customerApi';
+import type { Ticket } from '../../types/api';
+import { formatDate, formatTime } from '../../utils/format';
+import { getErrorMessage } from '../../utils/errors';
 
-interface Ticket {
-  id: string;
-  eventTitle: string;
-  eventDate: string;
-  eventLocation: string;
-  ticketType: string;
-  qrCode: string;
-  status: 'valid' | 'used' | 'expired';
-  purchaseDate: string;
-}
-
-const MOCK_TICKETS: Ticket[] = [
-  {
-    id: '1',
-    eventTitle: 'Summer Music Festival',
-    eventDate: '2024-06-15',
-    eventLocation: 'Warsaw',
-    ticketType: 'VIP',
-    qrCode: 'QR-12345',
-    status: 'valid',
-    purchaseDate: '2024-05-01',
-  },
-  {
-    id: '2',
-    eventTitle: 'Art Gallery Opening',
-    eventDate: '2024-06-20',
-    eventLocation: 'Krakow',
-    ticketType: 'General',
-    qrCode: 'QR-67890',
-    status: 'valid',
-    purchaseDate: '2024-05-10',
-  },
-  {
-    id: '3',
-    eventTitle: 'Food & Wine Tasting',
-    eventDate: '2024-05-10',
-    eventLocation: 'Gdansk',
-    ticketType: 'Premium',
-    qrCode: 'QR-11111',
-    status: 'used',
-    purchaseDate: '2024-04-20',
-  },
-];
+const isUpcoming = (ticket: Ticket) =>
+  ticket.status === 'VALID' && new Date(ticket.event.endDate) >= new Date();
 
 export default function CustomerTicketsScreen() {
   const { theme } = useTheme();
   const [selectedTab, setSelectedTab] = useState<'upcoming' | 'past'>('upcoming');
-  
-  // TODO: Replace with real API call when backend is ready
-  // const { data: tickets, isLoading } = useGetMyTicketsQuery();
-  const allTickets = MOCK_TICKETS;
+  const [openTicket, setOpenTicket] = useState<Ticket | null>(null);
+
+  const { data: allTickets = [], isLoading, isFetching, error, refetch } = useGetMyTicketsQuery();
 
   const styles = createStyles(theme);
 
-  const upcomingTickets = allTickets.filter(
-    ticket => ticket.status === 'valid' && new Date(ticket.eventDate) >= new Date()
-  );
-  
-  const pastTickets = allTickets.filter(
-    ticket => ticket.status === 'used' || new Date(ticket.eventDate) < new Date()
+  const upcomingTickets = useMemo(() => allTickets.filter(isUpcoming), [allTickets]);
+  const pastTickets = useMemo(
+    () => allTickets.filter((ticket) => !isUpcoming(ticket)).reverse(),
+    [allTickets]
   );
 
   const displayedTickets = selectedTab === 'upcoming' ? upcomingTickets : pastTickets;
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'valid':
-        return theme.success;
-      case 'used':
-        return theme.textMuted;
-      case 'expired':
-        return theme.error;
-      default:
-        return theme.textMuted;
-    }
+  const getStatusColor = (ticket: Ticket) => {
+    if (isUpcoming(ticket)) return theme.success;
+    if (ticket.status === 'CANCELLED' || ticket.status === 'REFUNDED') return theme.error;
+    return theme.textMuted;
   };
 
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'valid':
-        return 'Valid';
-      case 'used':
+  const getStatusText = (ticket: Ticket) => {
+    switch (ticket.status) {
+      case 'VALID':
+        return isUpcoming(ticket) ? 'Valid' : 'Expired';
+      case 'USED':
         return 'Used';
-      case 'expired':
-        return 'Expired';
+      case 'CANCELLED':
+        return 'Cancelled';
+      case 'REFUNDED':
+        return 'Refunded';
       default:
-        return status;
+        return ticket.status;
     }
   };
 
   const renderTicket = ({ item }: { item: Ticket }) => (
-    <TouchableOpacity style={styles.ticketCard}>
+    <TouchableOpacity
+      style={styles.ticketCard}
+      onPress={() => isUpcoming(item) && setOpenTicket(item)}
+      activeOpacity={isUpcoming(item) ? 0.7 : 1}
+    >
       <View style={styles.ticketHeader}>
         <View style={styles.ticketInfo}>
           <Text style={styles.ticketTitle} numberOfLines={2}>
-            {item.eventTitle}
+            {item.event.title}
           </Text>
-          <Text style={styles.ticketType}>{item.ticketType} Ticket</Text>
+          <Text style={styles.ticketType}>{item.ticketType.name} Ticket</Text>
         </View>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-          <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item) }]}>
+          <Text style={styles.statusText}>{getStatusText(item)}</Text>
         </View>
       </View>
 
@@ -118,21 +80,16 @@ export default function CustomerTicketsScreen() {
         <View style={styles.detailRow}>
           <Text style={styles.detailIcon}>📅</Text>
           <Text style={styles.detailText}>
-            {new Date(item.eventDate).toLocaleDateString('en-US', {
-              weekday: 'short',
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
+            {formatDate(item.event.startDate)} · {formatTime(item.event.startDate)}
           </Text>
         </View>
         <View style={styles.detailRow}>
           <Text style={styles.detailIcon}>📍</Text>
-          <Text style={styles.detailText}>{item.eventLocation}</Text>
+          <Text style={styles.detailText}>{item.event.venue || item.event.location}</Text>
         </View>
       </View>
 
-      {item.status === 'valid' && (
+      {isUpcoming(item) && (
         <View style={styles.qrCodeContainer}>
           <View style={styles.qrCodePlaceholder}>
             <Text style={styles.qrCodeText}>📱</Text>
@@ -142,9 +99,9 @@ export default function CustomerTicketsScreen() {
       )}
 
       <View style={styles.ticketFooter}>
-        <Text style={styles.ticketId}>Ticket #{item.qrCode}</Text>
+        <Text style={styles.ticketId}>Ticket #{item.id.slice(0, 8).toUpperCase()}</Text>
         <Text style={styles.purchaseDate}>
-          Purchased {new Date(item.purchaseDate).toLocaleDateString()}
+          Purchased {new Date(item.createdAt).toLocaleDateString()}
         </Text>
       </View>
     </TouchableOpacity>
@@ -181,25 +138,101 @@ export default function CustomerTicketsScreen() {
         keyExtractor={item => item.id}
         contentContainerStyle={styles.ticketsList}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isFetching && !isLoading} onRefresh={refetch} tintColor={theme.primary} />
+        }
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyStateIcon}>🎫</Text>
-            <Text style={styles.emptyStateText}>
-              {selectedTab === 'upcoming' ? 'No upcoming tickets' : 'No past tickets'}
-            </Text>
-            <Text style={styles.emptyStateSubtext}>
-              {selectedTab === 'upcoming'
-                ? 'Browse events and get your tickets!'
-                : 'Your past tickets will appear here'}
-            </Text>
-          </View>
+          isLoading ? (
+            <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 40 }} />
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyStateIcon}>🎫</Text>
+              <Text style={styles.emptyStateText}>
+                {error
+                  ? 'Could not load tickets'
+                  : selectedTab === 'upcoming'
+                    ? 'No upcoming tickets'
+                    : 'No past tickets'}
+              </Text>
+              <Text style={styles.emptyStateSubtext}>
+                {error
+                  ? getErrorMessage(error)
+                  : selectedTab === 'upcoming'
+                    ? 'Browse events and get your tickets!'
+                    : 'Your past tickets will appear here'}
+              </Text>
+            </View>
+          )
         }
       />
+
+      {/* Full-screen QR code to show at the entrance */}
+      <Modal
+        visible={!!openTicket}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpenTicket(null)}
+      >
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setOpenTicket(null)}>
+          {openTicket && (
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>{openTicket.event.title}</Text>
+              <Text style={styles.modalSubtitle}>
+                {openTicket.ticketType.name} · {formatDate(openTicket.event.startDate)}
+              </Text>
+              <Image source={{ uri: openTicket.qrImage }} style={styles.modalQr} resizeMode="contain" />
+              {!!openTicket.holderName && <Text style={styles.modalHolder}>{openTicket.holderName}</Text>}
+              <Text style={styles.modalHint}>Show this code at the entrance. Tap anywhere to close.</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const createStyles = (theme: any) => StyleSheet.create({
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  modalCard: {
+    width: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    fontSize: 20,
+    color: '#000000',
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: '#4b5563',
+    marginTop: 4,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalQr: {
+    width: 260,
+    height: 260,
+  },
+  modalHolder: {
+    fontSize: 16,
+    color: '#000000',
+    marginTop: 12,
+  },
+  modalHint: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginTop: 12,
+    textAlign: 'center',
+  },
   container: {
     flex: 1,
     backgroundColor: theme.background,
