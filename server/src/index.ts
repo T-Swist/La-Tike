@@ -11,6 +11,18 @@ const server = app.listen(env.PORT, () => {
   logger.info(`💳 Payments mode: ${env.paymentsMode}`);
 });
 
+server.on('error', (error: NodeJS.ErrnoException) => {
+  if (error.code === 'EADDRINUSE') {
+    logger.error(
+      `Port ${env.PORT} is already in use. If the Docker API is running, stop it with ` +
+        '"docker compose stop server" or set a different PORT in server/.env.'
+    );
+  } else {
+    logger.error('Server failed to start', { message: error.message });
+  }
+  process.exit(1);
+});
+
 const shutdown = (signal: string) => {
   logger.info(`${signal} received, shutting down`);
   server.close(async () => {

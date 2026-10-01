@@ -6,28 +6,16 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal",
-      "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.1.125:5000/api/v1",
-        "EXPO_PUBLIC_CURRENCY": "PLN"
-      }
+      "distribution": "internal"
     },
     "preview": {
       "distribution": "internal",
       "android": {
         "buildType": "apk"
-      },
-      "env": {
-        "EXPO_PUBLIC_API_URL": "http://192.168.1.125:5000/api/v1",
-        "EXPO_PUBLIC_CURRENCY": "PLN"
       }
     },
     "production": {
-      "autoIncrement": true,
-      "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.latike.com/api/v1",
-        "EXPO_PUBLIC_CURRENCY": "PLN"
-      }
+      "autoIncrement": true
     }
   },
   "submit": {

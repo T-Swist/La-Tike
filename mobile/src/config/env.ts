@@ -15,7 +15,7 @@ const devApiUrl = (): string => {
   return `http://${fallbackHost}:${API_PORT}/api/v1`;
 };
 
-// EXPO_PUBLIC_API_URL is inlined at build time (set per profile in eas.json).
+// EXPO_PUBLIC_API_URL comes from mobile/.env and is inlined when the app is bundled.
 const API_URL =
   process.env.EXPO_PUBLIC_API_URL || (__DEV__ ? devApiUrl() : 'https://api.latike.com/api/v1');
 

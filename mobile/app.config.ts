@@ -1,6 +1,6 @@
 import { ConfigContext, ExpoConfig } from 'expo/config';
 
-// Extends app.json with settings that depend on the build profile (see eas.json).
+// Extends app.json with settings that depend on EXPO_PUBLIC_API_URL (from mobile/.env).
 export default ({ config }: ConfigContext): ExpoConfig => {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL ?? '';
 

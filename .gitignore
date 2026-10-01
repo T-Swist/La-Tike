@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+# The mobile app's public config (API URL) must reach EAS builds, which only see git-tracked files
+!mobile/.env
 
 # Dependencies & build output
 node_modules/
